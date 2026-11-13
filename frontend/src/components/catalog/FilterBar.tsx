@@ -7,7 +7,7 @@ import type { Gender, Section, SortOption } from '../../types';
 interface Props {
   params: CatalogParams;
   onChange: (patch: Partial<CatalogParams>) => void;
-  /** Géneros que existen entre los productos de esta vista */
+  /** Públicos que se ofrecen como filtro (siempre todos, aunque una sección aún no tenga productos de alguno) */
   genders: Gender[];
   /** Tallas con stock entre los productos de esta vista */
   sizes: string[];

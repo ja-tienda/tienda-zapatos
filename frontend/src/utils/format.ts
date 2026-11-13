@@ -1,5 +1,5 @@
 import { DELIVERY_LABELS, PAYMENT_LABELS, STORE } from '../config/constants';
-import type { Order, Product, Settings } from '../types';
+import type { Gender, Order, Product, Settings } from '../types';
 
 export function formatPrice(value: number): string {
   return `${STORE.currency} ${value.toFixed(2)}`;
@@ -23,12 +23,22 @@ export function totalStock(product: Product): number {
   return product.variants.reduce((sum, v) => sum + (v.isActive ? v.stock : 0), 0);
 }
 
+/**
+ * ¿Un producto de este público aparece al filtrar por `filter`?
+ * Lo unisex de adultos sirve tanto a Dama como a Caballero, así que se muestra en ambos.
+ * En Niña y Niño solo sale lo marcado para ellos (las tallas de adulto no les sirven).
+ */
+export function matchesGender(productGender: Gender, filter: Gender): boolean {
+  if (productGender === filter) return true;
+  return productGender === 'UNISEX' && (filter === 'DAMA' || filter === 'CABALLERO');
+}
+
 /** Quita tildes y mayúsculas para que "pantalon" encuentre "Pantalón". */
 export function normalizeText(text: string): string {
   return text
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '');
+    .replace(/\p{M}/gu, ''); // quita las tildes (marcas diacríticas) que separó normalize('NFD')
 }
 
 /** Ordena tallas: numéricas de menor a mayor, luego XS–XXL y al final "Única". */

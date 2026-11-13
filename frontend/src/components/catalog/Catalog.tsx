@@ -4,7 +4,7 @@ import { GENDERS } from '../../config/constants';
 import { useStore } from '../../context/StoreContext';
 import { useCatalogParams } from '../../hooks/useCatalogParams';
 import type { Product, Section } from '../../types';
-import { compareSizes, normalizeText, totalStock } from '../../utils/format';
+import { compareSizes, matchesGender, normalizeText, totalStock } from '../../utils/format';
 import FilterBar from './FilterBar';
 import ProductGrid from './ProductGrid';
 
@@ -20,14 +20,14 @@ export default function Catalog({ products, facet }: Props) {
   const { loading, loadError, reload, openProduct, collections } = useStore();
   const { params, setParams, clear, hasActiveFilters } = useCatalogParams();
 
-  const { visible, genders, sizes } = useMemo(() => {
+  const { visible, sizes } = useMemo(() => {
     const term = normalizeText(params.q.trim());
     const collectionId = params.collection ? collections.find((c) => c.slug === params.collection)?.id : undefined;
 
     // Todo menos la talla: de aquí salen las tallas que se ofrecen como filtro
     const beforeSize = products.filter((p) => {
       if (term && !normalizeText(`${p.name} ${p.brand ?? ''} ${p.description} ${p.category.name}`).includes(term)) return false;
-      if (params.gender && p.gender !== params.gender) return false;
+      if (params.gender && !matchesGender(p.gender, params.gender)) return false;
       if (params.category && p.category.slug !== params.category) return false;
       if (params.collection && (collectionId === undefined || !p.collectionIds.includes(collectionId))) return false;
       return true;
@@ -51,7 +51,6 @@ export default function Catalog({ products, facet }: Props) {
 
     return {
       visible: sorted,
-      genders: GENDERS.filter((g) => products.some((p) => p.gender === g)),
       sizes: [...sizeSet].sort(compareSizes),
     };
   }, [products, params, collections]);
@@ -61,7 +60,7 @@ export default function Catalog({ products, facet }: Props) {
       <FilterBar
         params={params}
         onChange={setParams}
-        genders={genders}
+        genders={GENDERS}
         sizes={sizes}
         facet={facet}
         resultCount={visible.length}
