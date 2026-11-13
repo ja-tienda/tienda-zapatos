@@ -1,11 +1,12 @@
-import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { randomInt } from 'node:crypto';
+import path from 'node:path';
 import type { Request, Response } from 'express';
-import type { Order, OrderItem, Prisma } from '@prisma/client';
+import type { Order, OrderItem, OrderStatus, Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../config/prisma';
 import { HttpError, parseId } from '../utils/http';
 import { serializeOrder } from '../utils/serialize';
-import { deleteUpload, saveImage } from '../utils/uploads';
+import { RECEIPTS_DIR, deleteReceipt, saveReceipt } from '../utils/uploads';
 
 const orderSchema = z.object({
   customerName: z.string().trim().min(3, 'ingresa tu nombre completo').max(80),
@@ -14,10 +15,10 @@ const orderSchema = z.object({
     .trim()
     .transform((v) => v.replace(/[\s()+-]/g, ''))
     .pipe(z.string().regex(/^\d{9,12}$/, 'teléfono inválido (9 dígitos)')),
-  customerEmail: z.union([z.literal(''), z.email('correo inválido').max(120)]).nullish(),
   deliveryMethod: z.enum(['DELIVERY_LOCAL', 'ENVIO_PROVINCIA', 'RECOJO']),
   address: z.string().trim().max(200).default(''),
   notes: z.string().trim().max(300).nullish(),
+  // El navegador solo dice QUÉ quiere y CUÁNTO. Precios, total y stock los pone el servidor.
   items: z
     .array(
       z.object({
@@ -29,9 +30,16 @@ const orderSchema = z.object({
     .max(30),
 });
 
-const statusSchema = z.object({ status: z.enum(['PENDIENTE', 'CONFIRMADO', 'CANCELADO']) });
+const STATUSES = ['PENDIENTE', 'PAGADO', 'ENVIADO', 'ENTREGADO', 'CANCELADO'] as const;
+const statusSchema = z.object({ status: z.enum(STATUSES) });
 const walletSchema = z.object({ method: z.enum(['YAPE', 'PLIN']).default('YAPE') });
 const manualMethodSchema = z.object({ paymentMethod: z.enum(['TRANSFERENCIA', 'CONTRA_ENTREGA']) });
+
+const MINUTE = 60_000;
+/** Tiempo que se guarda el stock de un pedido recién creado mientras el cliente paga. */
+export const PAYMENT_WINDOW_MS = 30 * MINUTE;
+/** Si eligió coordinar por WhatsApp, la reserva dura dos días. */
+const MANUAL_WINDOW_MS = 48 * 60 * MINUTE;
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sin 0/O ni 1/I para dictarlo por WhatsApp
 
@@ -43,53 +51,86 @@ function newOrderCode(): string {
 
 type OrderWithItems = Order & { items: OrderItem[] };
 
-/**
- * Busca el pedido del cliente a partir del código de la URL y la clave secreta que su
- * navegador recibió al crearlo (cabecera X-Order-Token). Sin esa clave nadie puede ver
- * ni modificar un pedido ajeno aunque adivine el código.
- */
-export async function findCustomerOrder(req: Request): Promise<OrderWithItems> {
+/** El pedido de la URL, solo si pertenece al cliente que tiene la sesión. */
+export async function findOwnOrder(req: Request): Promise<OrderWithItems> {
   const code = String(req.params.code ?? '').toUpperCase();
-  const token = String(req.headers['x-order-token'] ?? '');
   const order = await prisma.order.findUnique({ where: { code }, include: { items: true } });
-
-  const expected = Buffer.from(order?.publicToken ?? '');
-  const received = Buffer.from(token);
-  const valid = order && expected.length > 0 && expected.length === received.length && timingSafeEqual(expected, received);
-  if (!valid) throw new HttpError(404, 'No encontramos este pedido en este dispositivo');
+  // Mismo error exista o no: no se revela qué códigos son reales
+  if (!order || order.userId !== req.user!.id) throw new HttpError(404, 'No encontramos este pedido en tu cuenta');
   return order;
 }
 
 function assertAwaitingPayment(order: Order) {
-  if (order.status === 'CANCELADO') throw new HttpError(409, 'Este pedido fue cancelado');
-  if (order.status === 'CONFIRMADO' || order.paidAt) throw new HttpError(409, 'Este pedido ya está pagado');
+  if (order.status === 'CANCELADO') throw new HttpError(409, 'Este pedido fue cancelado. Vuelve a armar tu carrito.');
+  if (order.status !== 'PENDIENTE') throw new HttpError(409, 'Este pedido ya está pagado');
 }
 
 /**
- * Descuenta el stock de cada línea. Si alguna talla ya no alcanza lanza un 409
- * (dentro de una transacción, eso revierte todo lo descontado).
+ * Descuenta del inventario las unidades de cada línea. El descuento lleva la condición
+ * "solo si quedan suficientes" dentro de la misma operación de la base de datos, así dos
+ * compras simultáneas de la última unidad no pueden ganar las dos: la segunda recibe un 409
+ * y, al estar en una transacción, se deshace todo lo que ya había descontado.
  */
-export async function takeStock(tx: Prisma.TransactionClient, items: OrderItem[]) {
+export async function takeStock(tx: Prisma.TransactionClient, items: Pick<OrderItem, 'variantId' | 'quantity' | 'productName' | 'size'>[]) {
   for (const item of items) {
-    if (item.variantId === null) continue; // la talla fue eliminada del catálogo
+    if (item.variantId === null) throw new HttpError(409, `${item.productName} ya no está disponible`);
     const updated = await tx.productVariant.updateMany({
-      where: { id: item.variantId, stock: { gte: item.quantity } },
+      where: { id: item.variantId, isActive: true, stock: { gte: item.quantity } },
       data: { stock: { decrement: item.quantity } },
     });
     if (updated.count === 0) {
-      throw new HttpError(409, `Stock insuficiente de ${item.productName} (talla ${item.size})`);
+      throw new HttpError(409, `${item.productName} (talla ${item.size}) se agotó o no quedan suficientes`);
     }
   }
 }
 
+/** Devuelve al inventario lo que el pedido tenía reservado. */
+async function releaseStock(tx: Prisma.TransactionClient, order: OrderWithItems) {
+  if (!order.stockReserved) return;
+  for (const item of order.items) {
+    if (item.variantId === null) continue; // la talla fue eliminada del catálogo
+    await tx.productVariant.update({ where: { id: item.variantId }, data: { stock: { increment: item.quantity } } });
+  }
+}
+
 /**
- * POST /api/orders
- * El cliente solo envía variantId + cantidad. Nombre, precio y total se calculan
- * aquí con los datos reales de la BD, así nadie puede alterar precios desde el navegador.
- * El stock se valida ahora, pero se descuenta recién cuando se confirma el pago.
- * Devuelve el pedido y la clave (`token`) con la que ese navegador podrá pagarlo.
+ * Cancela un pedido pendiente y libera su stock. La condición sobre el estado hace de
+ * candado: si en ese instante el pedido se pagó, no se cancela.
+ */
+async function cancelPending(order: OrderWithItems): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    const { count } = await tx.order.updateMany({
+      where: { id: order.id, status: 'PENDIENTE' },
+      data: { status: 'CANCELADO', stockReserved: false, reservedUntil: null },
+    });
+    if (count === 0) return false;
+    await releaseStock(tx, order);
+    return true;
+  });
+}
+
+/**
+ * Libera el stock de los pedidos que nadie pagó a tiempo (carritos abandonados en el pago).
+ * El servidor lo ejecuta cada minuto.
+ */
+export async function releaseExpiredOrders(): Promise<number> {
+  const expired = await prisma.order.findMany({
+    where: { status: 'PENDIENTE', paidAt: null, reservedUntil: { lt: new Date() } },
+    include: { items: true },
+    take: 100,
+  });
+  let released = 0;
+  for (const order of expired) if (await cancelPending(order)) released++;
+  return released;
+}
+
+/**
+ * POST /api/orders (cliente con sesión)
+ * Crea el pedido y RESERVA su stock en la misma transacción. Nombre, precio y total salen
+ * de la base de datos, nunca de lo que envía el navegador.
  */
 export async function createOrder(req: Request, res: Response) {
+  const user = req.user!;
   const data = orderSchema.parse(req.body);
 
   if (data.deliveryMethod !== 'RECOJO' && data.address.length < 5) {
@@ -135,88 +176,115 @@ export async function createOrder(req: Request, res: Response) {
     };
   });
 
-  if (problems.length > 0) {
-    throw new HttpError(409, problems[0].message, { stock: problems });
-  }
+  if (problems.length > 0) throw new HttpError(409, problems[0].message, { stock: problems });
 
   const items = lines.filter((l) => l !== null);
   const total = items.reduce((sum, i) => sum + Number(i.unitPrice) * i.quantity, 0);
-  const token = randomBytes(24).toString('hex');
 
-  const order = await prisma.order.create({
-    data: {
-      code: newOrderCode(),
-      publicToken: token,
-      customerName: data.customerName,
-      customerPhone: data.customerPhone,
-      customerEmail: data.customerEmail || null,
-      deliveryMethod: data.deliveryMethod,
-      address: data.address,
-      notes: data.notes || null,
-      total: total.toFixed(2),
-      items: { create: items },
-    },
-    include: { items: true },
+  const order = await prisma.$transaction(async (tx) => {
+    // Un cliente no puede acaparar stock con muchos pedidos sin pagar: los anteriores
+    // que aún no eligieron forma de pago se cancelan y liberan lo suyo.
+    const stale = await tx.order.findMany({
+      where: { userId: user.id, status: 'PENDIENTE', paymentMethod: null, paidAt: null },
+      include: { items: true },
+    });
+    for (const old of stale) {
+      const { count } = await tx.order.updateMany({
+        where: { id: old.id, status: 'PENDIENTE' },
+        data: { status: 'CANCELADO', stockReserved: false, reservedUntil: null },
+      });
+      if (count === 1) await releaseStock(tx, old);
+    }
+
+    await takeStock(tx, items);
+    return tx.order.create({
+      data: {
+        code: newOrderCode(),
+        userId: user.id,
+        customerName: data.customerName,
+        customerPhone: data.customerPhone,
+        customerEmail: user.email,
+        deliveryMethod: data.deliveryMethod,
+        address: data.address,
+        notes: data.notes || null,
+        total: total.toFixed(2),
+        stockReserved: true,
+        reservedUntil: new Date(Date.now() + PAYMENT_WINDOW_MS),
+        items: { create: items },
+      },
+      include: { items: true },
+    });
   });
 
-  res.status(201).json({ order: serializeOrder(order), token });
+  // Guarda el teléfono en la cuenta para la próxima compra
+  if (!user.phone) await prisma.user.update({ where: { id: user.id }, data: { phone: data.customerPhone } });
+
+  res.status(201).json(serializeOrder(order, 'customer'));
 }
 
-/** GET /api/orders/:code (cliente, con X-Order-Token) — para la página de pago y seguimiento. */
-export async function getCustomerOrder(req: Request, res: Response) {
-  res.json(serializeOrder(await findCustomerOrder(req)));
+/** GET /api/orders/:code (su dueño) — para la página de pago y seguimiento. */
+export async function getOwnOrder(req: Request, res: Response) {
+  res.json(serializeOrder(await findOwnOrder(req), 'customer'));
 }
 
 /**
- * POST /api/orders/:code/receipt (cliente, multipart con "file" y "method")
- * "Ya pagué · Enviar comprobante": guarda la captura del Yape/Plin para que la
- * administradora la revise en el panel y confirme el pago.
+ * POST /api/orders/:code/receipt (su dueño, multipart con "file" y "method")
+ * "Ya pagué · Enviar comprobante": guarda la captura del Yape/Plin en una carpeta privada.
+ * El pedido sigue PENDIENTE hasta que la administradora la revise.
  */
 export async function uploadReceipt(req: Request, res: Response) {
-  const order = await findCustomerOrder(req);
+  const order = await findOwnOrder(req);
   assertAwaitingPayment(order);
   if (!req.file) throw new HttpError(400, 'Adjunta la captura de tu pago');
   const { method } = walletSchema.parse(req.body);
 
-  const receiptUrl = await saveImage(req.file.buffer, 'comprobantes');
+  const receiptUrl = await saveReceipt(req.file.buffer);
   const updated = await prisma.order.update({
     where: { id: order.id },
-    data: { receiptUrl, paymentMethod: method },
+    // Con comprobante enviado la reserva ya no vence sola: decide la administradora
+    data: { receiptUrl, paymentMethod: method, reservedUntil: null },
     include: { items: true },
   });
-  await deleteUpload(order.receiptUrl); // si reenvía la captura, la anterior ya no hace falta
-  res.json(serializeOrder(updated));
+  await deleteReceipt(order.receiptUrl); // si reenvía la captura, la anterior ya no hace falta
+  res.json(serializeOrder(updated, 'customer'));
 }
 
-/** POST /api/orders/:code/method (cliente) — transferencia o contra entrega, a coordinar por WhatsApp. */
+/** POST /api/orders/:code/method (su dueño) — transferencia o contra entrega, a coordinar por WhatsApp. */
 export async function setManualMethod(req: Request, res: Response) {
-  const order = await findCustomerOrder(req);
+  const order = await findOwnOrder(req);
   assertAwaitingPayment(order);
   const { paymentMethod } = manualMethodSchema.parse(req.body);
   const updated = await prisma.order.update({
     where: { id: order.id },
-    data: { paymentMethod },
+    data: { paymentMethod, reservedUntil: new Date(Date.now() + MANUAL_WINDOW_MS) },
     include: { items: true },
   });
-  res.json(serializeOrder(updated));
+  res.json(serializeOrder(updated, 'customer'));
 }
 
 /**
- * POST /api/orders/:code/cancel (cliente) — solo mientras no haya elegido cómo pagar.
- * En cuanto envía un comprobante, paga con tarjeta o avisa que coordinará por WhatsApp,
- * el pedido queda en manos de la administradora.
+ * POST /api/orders/:code/cancel (su dueño) — solo mientras no haya elegido cómo pagar.
+ * En cuanto envía un comprobante o paga, el pedido queda en manos de la administradora.
  */
-export async function cancelCustomerOrder(req: Request, res: Response) {
-  const order = await findCustomerOrder(req);
+export async function cancelOwnOrder(req: Request, res: Response) {
+  const order = await findOwnOrder(req);
   if (order.status !== 'PENDIENTE' || order.paidAt || order.receiptUrl || order.paymentMethod !== null) {
     throw new HttpError(409, 'Este pedido ya no se puede cancelar desde aquí. Escríbenos por WhatsApp.');
   }
-  const updated = await prisma.order.update({
-    where: { id: order.id },
-    data: { status: 'CANCELADO' },
-    include: { items: true },
+  await cancelPending(order);
+  const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id }, include: { items: true } });
+  res.json(serializeOrder(updated, 'customer'));
+}
+
+/** GET /api/receipts/:file (admin) — la captura de un pago. Nunca es pública. */
+export async function getReceipt(req: Request, res: Response) {
+  const file = String(req.params.file);
+  if (!/^[a-f0-9]{32}\.webp$/.test(file)) throw new HttpError(404, 'Comprobante no encontrado');
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+  res.sendFile(path.join(RECEIPTS_DIR, file), (err) => {
+    if (err && !res.headersSent) res.status(404).json({ error: 'Comprobante no encontrado' });
   });
-  res.json(serializeOrder(updated));
 }
 
 /** GET /api/orders?status=PENDIENTE (admin) */
@@ -226,16 +294,25 @@ export async function listOrders(req: Request, res: Response) {
     where: status ? { status } : {},
     include: { items: true },
     orderBy: { createdAt: 'desc' },
-    take: 200,
+    take: 300,
   });
-  res.json(orders.map(serializeOrder));
+  res.json(orders.map((o) => serializeOrder(o, 'admin')));
 }
+
+// Cambios de estado que puede hacer la administradora
+const TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+  PENDIENTE: ['PAGADO', 'CANCELADO'],
+  PAGADO: ['ENVIADO', 'CANCELADO'],
+  ENVIADO: ['ENTREGADO', 'CANCELADO'],
+  ENTREGADO: [],
+  CANCELADO: [],
+};
 
 /**
  * PATCH /api/orders/:id/status (admin)
- * PENDIENTE -> CONFIRMADO : descuenta stock (falla si ya no alcanza)
- * CONFIRMADO -> CANCELADO : devuelve el stock
- * PENDIENTE -> CANCELADO  : no toca stock
+ * PENDIENTE -> PAGADO        : confirma el pago (el stock ya estaba reservado)
+ * PAGADO -> ENVIADO -> ENTREGADO
+ * cualquiera -> CANCELADO    : devuelve el stock reservado al inventario
  */
 export async function updateOrderStatus(req: Request, res: Response) {
   const id = parseId(req.params.id);
@@ -245,33 +322,27 @@ export async function updateOrderStatus(req: Request, res: Response) {
     const current = await tx.order.findUnique({ where: { id }, include: { items: true } });
     if (!current) throw new HttpError(404, 'Pedido no encontrado');
     if (current.status === next) return current;
-
-    const transition = `${current.status}>${next}`;
-    if (!['PENDIENTE>CONFIRMADO', 'PENDIENTE>CANCELADO', 'CONFIRMADO>CANCELADO'].includes(transition)) {
+    if (!TRANSITIONS[current.status].includes(next)) {
       throw new HttpError(409, `No se puede pasar un pedido de ${current.status} a ${next}`);
     }
 
     // Candado: solo una petición gana si llegan dos clics a la vez.
     const { count } = await tx.order.updateMany({
       where: { id, status: current.status },
-      data: { status: next },
+      data: {
+        status: next,
+        ...(next === 'PAGADO' ? { paidAt: current.paidAt ?? new Date(), stockReserved: true, reservedUntil: null } : {}),
+        ...(next === 'CANCELADO' ? { stockReserved: false, reservedUntil: null } : {}),
+      },
     });
     if (count === 0) throw new HttpError(409, 'El pedido cambió mientras lo editabas. Actualiza la lista.');
 
-    if (transition === 'PENDIENTE>CONFIRMADO') {
-      await takeStock(tx, current.items);
-    } else if (transition === 'CONFIRMADO>CANCELADO') {
-      for (const item of current.items) {
-        if (item.variantId === null) continue;
-        await tx.productVariant.update({
-          where: { id: item.variantId },
-          data: { stock: { increment: item.quantity } },
-        });
-      }
-    }
+    // Pedidos anteriores a la reserva automática: su stock se descuenta al confirmar el pago
+    if (next === 'PAGADO' && !current.stockReserved) await takeStock(tx, current.items);
+    if (next === 'CANCELADO') await releaseStock(tx, current);
 
     return tx.order.findUniqueOrThrow({ where: { id }, include: { items: true } });
   });
 
-  res.json(serializeOrder(order));
+  res.json(serializeOrder(order, 'admin'));
 }

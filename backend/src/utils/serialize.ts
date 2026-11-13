@@ -66,11 +66,16 @@ export function serializeSection(s: SectionWithCounts) {
   };
 }
 
-/** Nunca incluye publicToken: esa clave solo se entrega una vez, al crear el pedido. */
-export function serializeOrder(o: OrderWithItems) {
+/**
+ * Pedido para enviar al navegador.
+ * 'admin'    -> incluye el enlace (privado) a la captura del pago y la referencia de la pasarela.
+ * 'customer' -> el cliente solo sabe SI envió su comprobante; el archivo no se le devuelve.
+ */
+export function serializeOrder(o: OrderWithItems, audience: 'admin' | 'customer') {
   return {
     id: o.id,
     code: o.code,
+    userId: audience === 'admin' ? o.userId : undefined,
     customerName: o.customerName,
     customerPhone: o.customerPhone,
     customerEmail: o.customerEmail,
@@ -80,9 +85,11 @@ export function serializeOrder(o: OrderWithItems) {
     notes: o.notes,
     total: Number(o.total),
     status: o.status,
-    receiptUrl: o.receiptUrl,
-    paymentRef: o.paymentRef,
+    hasReceipt: o.receiptUrl !== null,
+    receiptUrl: audience === 'admin' ? o.receiptUrl : undefined,
+    paymentRef: audience === 'admin' ? o.paymentRef : undefined,
     paidAt: o.paidAt,
+    reservedUntil: o.reservedUntil,
     createdAt: o.createdAt,
     items: o.items.map((i) => ({
       id: i.id,

@@ -32,7 +32,41 @@ const DEFINITIONS = {
   walletHolder: { max: 80, default: 'Jessica Paola Ramos Luján' },
   walletQrUrl: { max: 500, image: true, default: '' },
 
+  // --- Datos del negocio (Libro de Reclamaciones y pie de página) ---
+  businessName: { max: 120, default: 'Jessica Paola Ramos Luján' }, // razón social o nombre del titular
+  businessRuc: { max: 11, default: '' },
+  businessAddress: { max: 200, default: '' },
+
+  // --- Buscadores y enlaces compartidos ---
+  seoDescription: {
+    max: 200,
+    default:
+      'Zapatillas en tendencia, ropa y accesorios para dama, caballero, niña y niño. Stock real por talla, pago con Yape, Plin o tarjeta y envíos a todo el Perú.',
+  },
+
   // --- Textos legales ---
+  returnsText: {
+    max: 20000,
+    default: [
+      '1. Cambios por talla o modelo',
+      'Puedes pedir el cambio dentro de los 7 días calendario desde que recibiste tu pedido. El producto debe estar sin uso, con sus etiquetas y en su empaque original.',
+      '',
+      '2. Cómo solicitarlo',
+      'Escríbenos por WhatsApp con tu código de pedido y una foto del producto. Te indicaremos cómo enviarlo o dónde dejarlo.',
+      '',
+      '3. Costos de envío',
+      'Si el cambio es por talla o gusto, el envío de ida y vuelta lo asume el cliente. Si el producto llegó fallado o no es el que pediste, lo asumimos nosotros.',
+      '',
+      '4. Devolución del dinero',
+      'Procede cuando el producto tiene una falla de fábrica o no corresponde a lo comprado y no hay stock para reemplazarlo. La devolución se hace por el mismo medio de pago en un máximo de 7 días hábiles.',
+      '',
+      '5. Productos sin cambio',
+      'Por higiene no se aceptan cambios de medias, ropa interior ni productos usados o lavados. Los productos en liquidación solo se cambian por falla de fábrica.',
+      '',
+      '6. Garantía',
+      'Todos los productos tienen garantía por defectos de fabricación. No cubre el desgaste normal ni los daños por mal uso.',
+    ].join('\n'),
+  },
   termsText: {
     max: 20000,
     default: [
