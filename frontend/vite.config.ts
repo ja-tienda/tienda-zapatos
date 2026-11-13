@@ -35,6 +35,12 @@ export default defineConfig({
       },
     },
   },
+  // Producción (Railway): `npm start` sirve dist/ en 0.0.0.0:$PORT.
+  preview: {
+    host: '0.0.0.0',
+    port: Number(process.env.PORT ?? 4173),
+    allowedHosts: true,
+  },
   server: {
     port: 5173,
     strictPort: true,
