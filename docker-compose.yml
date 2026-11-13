@@ -1,0 +1,24 @@
+name: ja-ecommerce
+
+services:
+  db:
+    image: postgres:17
+    container_name: ja-tienda-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ja_tienda}
+      POSTGRES_USER: ${POSTGRES_USER:-ja_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ja_tienda_2026}
+    ports:
+      # 5433 en el host: el 5432 ya lo usa el contenedor inventario-db
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - ja_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ja_admin} -d ${POSTGRES_DB:-ja_tienda}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  ja_pgdata:

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+
+# Imágenes subidas desde el panel y capturas de pago
+backend/uploads/
