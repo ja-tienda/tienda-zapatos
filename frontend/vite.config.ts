@@ -35,6 +35,11 @@ export default defineConfig({
       },
     },
   },
+  // Producción (npm start): Railway inyecta PORT y el dominio público.
+  preview: {
+    host: '0.0.0.0',
+    allowedHosts: true,
+  },
   server: {
     port: 5173,
     strictPort: true,
