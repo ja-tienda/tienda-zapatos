@@ -1,20 +1,21 @@
 import { useStore } from '../context/StoreContext';
-import { usePageTitle } from '../hooks/usePageTitle';
+import { usePageMeta } from '../hooks/usePageMeta';
 
 const PAGES = {
   terms: { title: 'Términos y condiciones', key: 'termsText' },
   privacy: { title: 'Política de privacidad', key: 'privacyText' },
+  returns: { title: 'Cambios y devoluciones', key: 'returnsText' },
 } as const;
 
 /**
- * Términos y Política de privacidad. El texto se escribe en el panel (Contacto y pagos):
+ * Términos, Política de privacidad y Cambios y devoluciones. El texto se escribe en el panel (Contacto y pagos):
  * cada párrafo en su línea; las líneas cortas que empiezan con un número ("1. Pedidos")
  * se muestran como subtítulos.
  */
 export default function LegalPage({ kind }: { kind: keyof typeof PAGES }) {
   const { settings, loading } = useStore();
   const page = PAGES[kind];
-  usePageTitle(page.title);
+  usePageMeta(page.title);
   const text = settings[page.key];
   const blocks = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
 

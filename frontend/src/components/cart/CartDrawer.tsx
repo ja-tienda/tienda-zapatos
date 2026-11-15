@@ -5,7 +5,6 @@ import { useCart } from '../../context/CartContext';
 import { useStore } from '../../context/StoreContext';
 import type { CartItem } from '../../types';
 import { formatPrice } from '../../utils/format';
-import { lastOrder } from '../../utils/orderStore';
 import { useEscapeKey, useLockBodyScroll } from '../modals/Modal';
 
 /** Línea de producto con control de cantidad (limitado al stock real). También se usa en el checkout. */
@@ -91,7 +90,6 @@ export function CartNotices() {
 export default function CartDrawer() {
   const { items, subtotal, count, closeCart } = useCart();
   const navigate = useNavigate();
-  const myOrder = lastOrder();
 
   useLockBodyScroll();
   useEscapeKey(closeCart);
@@ -140,18 +138,16 @@ export default function CartDrawer() {
             >
               Seguir viendo
             </button>
-            {myOrder && (
-              <button
-                type="button"
-                onClick={() => {
-                  closeCart();
-                  navigate(ROUTES.order(myOrder.code));
-                }}
-                className="mt-4 text-sm font-medium text-stone-600 underline underline-offset-4 hover:text-stone-900"
-              >
-                Ver mi pedido {myOrder.code}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                closeCart();
+                navigate(ROUTES.account);
+              }}
+              className="mt-4 text-sm font-medium text-stone-600 underline underline-offset-4 hover:text-stone-900"
+            >
+              Ver mis pedidos
+            </button>
           </div>
         ) : (
           <>

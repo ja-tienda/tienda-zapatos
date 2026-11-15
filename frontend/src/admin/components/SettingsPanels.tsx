@@ -176,6 +176,11 @@ export function AppearancePanel({ settings, onSave }: PanelProps) {
 }
 
 const STORE_KEYS = [
+  'businessName',
+  'businessRuc',
+  'businessAddress',
+  'seoDescription',
+  'returnsText',
   'contactName',
   'contactPhone',
   'contactEmail',
@@ -216,6 +221,27 @@ export function StorePanel({ settings, onSave }: PanelProps) {
           <Field label="Horario de atención" hint="Puedes usar varias líneas.">
             <textarea value={values.businessHours} onChange={(e) => set('businessHours', e.target.value)} rows={2} maxLength={200} className={fieldClass} />
           </Field>
+        </div>
+      </Card>
+
+      <Card title="Datos del negocio" help="Aparecen en el Libro de Reclamaciones y en el pie de página.">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Razón social o nombre del titular">
+            <input type="text" value={values.businessName} onChange={(e) => set('businessName', e.target.value)} maxLength={120} className={fieldClass} />
+          </Field>
+          <Field label="RUC" hint="11 dígitos. Si aún no tienes, déjalo vacío.">
+            <input type="text" inputMode="numeric" value={values.businessRuc} onChange={(e) => set('businessRuc', e.target.value.replace(/\D/g, '').slice(0, 11))} className={fieldClass} />
+          </Field>
+          <div className="sm:col-span-2">
+            <Field label="Dirección del negocio">
+              <input type="text" value={values.businessAddress} onChange={(e) => set('businessAddress', e.target.value)} maxLength={200} className={fieldClass} />
+            </Field>
+          </div>
+          <div className="sm:col-span-2">
+            <Field label="Descripción de la tienda para Google y WhatsApp" hint="Una o dos frases. Es el texto que sale bajo el título al compartir el enlace de la tienda.">
+              <textarea value={values.seoDescription} onChange={(e) => set('seoDescription', e.target.value)} rows={2} maxLength={200} className={fieldClass} />
+            </Field>
+          </div>
         </div>
       </Card>
 
@@ -263,6 +289,9 @@ export function StorePanel({ settings, onSave }: PanelProps) {
       </Card>
 
       <Card title="Textos legales" help="Se muestran en las páginas enlazadas desde el pie. Escribe cada párrafo en una línea; una línea corta que empieza con número (“1. Pedidos”) sale como subtítulo.">
+        <Field label="Cambios y devoluciones">
+          <textarea value={values.returnsText} onChange={(e) => set('returnsText', e.target.value)} rows={10} maxLength={20000} className={fieldClass} />
+        </Field>
         <Field label="Términos y condiciones">
           <textarea value={values.termsText} onChange={(e) => set('termsText', e.target.value)} rows={10} maxLength={20000} className={fieldClass} />
         </Field>

@@ -1,6 +1,7 @@
-import { Ruler, Search, ShoppingBag, X } from 'lucide-react';
+import { Ruler, Search, ShoppingBag, UserRound, X } from 'lucide-react';
 import { Link, NavLink, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { ROUTES, STORE } from '../../config/constants';
+import { useAuth } from '../../context/AuthContext';
 import { useCart } from '../../context/CartContext';
 import { useStore } from '../../context/StoreContext';
 
@@ -68,6 +69,7 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 export default function Header() {
   const { count, openCart } = useCart();
   const { settings, categories, collections, openSizeGuide } = useStore();
+  const { user } = useAuth();
 
   return (
     <>
@@ -102,6 +104,16 @@ export default function Header() {
               <span className="hidden min-[400px]:inline">Guía de Tallas</span>
               <span className="min-[400px]:hidden">Tallas</span>
             </button>
+            {/* Entrar no es obligatorio para navegar: aquí vuelve quien ya tiene cuenta */}
+            <Link
+              to={ROUTES.account}
+              aria-label={user ? `Mi cuenta (${user.name})` : 'Mi cuenta: iniciar sesión'}
+              title={user ? 'Mi cuenta' : 'Iniciar sesión'}
+              className="relative grid size-10 shrink-0 place-items-center rounded-full text-stone-700 hover:bg-stone-100 hover:text-stone-900"
+            >
+              <UserRound className="size-5" aria-hidden />
+              {user && <span className="absolute right-1.5 top-1.5 size-2.5 rounded-full bg-emerald-500 ring-2 ring-stone-50" aria-hidden />}
+            </Link>
             <button
               type="button"
               onClick={openCart}

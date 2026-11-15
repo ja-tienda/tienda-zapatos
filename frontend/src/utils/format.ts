@@ -71,11 +71,12 @@ export function buildOrderMessage(order: Order, settings: Pick<Settings, 'contac
   );
 
   const payment = order.paymentMethod ? PAYMENT_LABELS[order.paymentMethod] : 'Por coordinar';
+  // La captura del pago es privada: no se pega su enlace, la administradora la ve en su panel
   const paymentNote =
-    order.paidAt !== null
+    order.paymentMethod === 'TARJETA' && order.paidAt !== null
       ? '✅ Pagado con tarjeta'
-      : order.receiptUrl
-        ? `🧾 Ya pagué. Mi comprobante: ${absoluteUrl(order.receiptUrl)}`
+      : order.hasReceipt
+        ? '🧾 Ya pagué y subí mi comprobante en la web.'
         : null;
 
   return [

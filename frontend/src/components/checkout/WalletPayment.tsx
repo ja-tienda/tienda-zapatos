@@ -7,7 +7,6 @@ import { formatPhone, formatPrice } from '../../utils/format';
 
 interface Props {
   order: Order;
-  orderToken: string;
   /** Se llama con el pedido actualizado cuando el comprobante quedó guardado. */
   onSent: (order: Order) => void;
 }
@@ -60,9 +59,9 @@ function DataRow({ label, value, copy }: { label: string; value: string; copy?: 
 
 /**
  * Pago con Yape o Plin: muestra el QR y los datos, y recibe la captura del pago.
- * La captura se guarda en el pedido para que la administradora la revise en su panel.
+ * La captura se guarda en una carpeta privada del servidor: solo la administradora la ve.
  */
-export default function WalletPayment({ order, orderToken, onSent }: Props) {
+export default function WalletPayment({ order, onSent }: Props) {
   const { settings } = useStore();
   const [wallet, setWallet] = useState<'YAPE' | 'PLIN'>('YAPE');
   const [file, setFile] = useState<File | null>(null);
@@ -95,7 +94,7 @@ export default function WalletPayment({ order, orderToken, onSent }: Props) {
     setSending(true);
     setError(null);
     try {
-      onSent(await api.sendReceipt(order.code, orderToken, file, wallet));
+      onSent(await api.sendReceipt(order.code, file, wallet));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'No se pudo enviar el comprobante. Inténtalo de nuevo.');
       setSending(false);

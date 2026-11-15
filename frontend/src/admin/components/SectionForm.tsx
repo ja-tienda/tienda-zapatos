@@ -1,8 +1,8 @@
 import { ArrowLeft, LoaderCircle } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import SectionHero from '../../components/layout/SectionHero';
-import { ROUTES, SECTION_KIND_LABELS, SIZE_TYPE_LABELS } from '../../config/constants';
-import type { Section, SectionInput, SectionKind, SizeType } from '../../types';
+import { GENDER_LABELS, ROUTES, SECTION_KIND_LABELS, SIZE_TYPE_LABELS } from '../../config/constants';
+import type { Product, Section, SectionInput, SectionKind, SizeType } from '../../types';
 import { fieldClass } from '../AdminContext';
 import ImageInput from './ImageInput';
 
@@ -10,7 +10,10 @@ interface Props {
   /** Sección a editar, o el tipo de la nueva sección */
   section: Section | null;
   kind: SectionKind;
-  onSave: (data: SectionInput) => Promise<void>;
+  /** Todos los productos, para elegir cuáles pertenecen a una temporada */
+  products: Product[];
+  /** `productIds` solo llega en temporadas/colecciones: la lista completa de sus productos */
+  onSave: (data: SectionInput, productIds?: number[]) => Promise<void>;
   onCancel: () => void;
 }
 
@@ -20,7 +23,7 @@ const WORDS: Record<SectionKind, { one: string; newTitle: string; example: strin
 };
 
 /** Crea o edita una sección (categoría o temporada) con la vista previa de su portada. */
-export default function SectionForm({ section, kind, onSave, onCancel }: Props) {
+export default function SectionForm({ section, kind, products, onSave, onCancel }: Props) {
   const isNew = section === null;
   const words = WORDS[kind];
   const [name, setName] = useState(section?.name ?? '');
@@ -32,6 +35,10 @@ export default function SectionForm({ section, kind, onSave, onCancel }: Props) 
   const [showInCarousel, setShowInCarousel] = useState(section?.showInCarousel ?? kind === 'COLECCION');
   const [sortOrder, setSortOrder] = useState(String(section?.sortOrder ?? ''));
   const [isActive, setIsActive] = useState(section?.isActive ?? true);
+  const [productIds, setProductIds] = useState<number[]>(() =>
+    section ? products.filter((p) => p.collectionIds.includes(section.id)).map((p) => p.id) : [],
+  );
+  const toggleProduct = (id: number) => setProductIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -56,7 +63,7 @@ export default function SectionForm({ section, kind, onSave, onCancel }: Props) 
         showInCarousel: kind === 'COLECCION' && showInCarousel,
         sortOrder: sortOrder.trim() === '' ? undefined : Math.max(0, Math.floor(Number(sortOrder) || 0)),
         isActive,
-      });
+      }, kind === 'COLECCION' ? productIds : undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo guardar.');
       setSaving(false);
@@ -161,6 +168,44 @@ export default function SectionForm({ section, kind, onSave, onCancel }: Props) 
             Visible en la tienda
           </label>
         </div>
+
+        {kind === 'COLECCION' && (
+          <fieldset className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
+            <legend className="px-1 text-sm font-semibold text-stone-900">
+              Productos de esta temporada <span className="font-normal text-stone-500">({productIds.length} elegidos)</span>
+            </legend>
+            <p className="text-xs text-stone-500">
+              Marca todo lo que debe aparecer en su página, sin importar la categoría ni si es para dama, caballero, niña o niño.
+            </p>
+            {products.length === 0 ? (
+              <p className="mt-3 text-sm text-stone-500">Aún no hay productos.</p>
+            ) : (
+              <ul className="mt-3 grid max-h-72 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-2">
+                {products.map((p) => {
+                  const checked = productIds.includes(p.id);
+                  return (
+                    <li key={p.id}>
+                      <label
+                        className={`flex cursor-pointer items-center gap-2.5 rounded-xl border bg-white p-2 text-sm ${
+                          checked ? 'border-stone-900' : 'border-stone-200 hover:border-stone-400'
+                        }`}
+                      >
+                        <input type="checkbox" checked={checked} onChange={() => toggleProduct(p.id)} className="size-4 shrink-0 accent-rose-600" />
+                        {p.images[0] && <img src={p.images[0]} alt="" className="size-9 shrink-0 rounded-lg object-cover" />}
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium text-stone-900">{p.name}</span>
+                          <span className="block text-xs text-stone-500">
+                            {p.category.name} · {GENDER_LABELS[p.gender]}
+                          </span>
+                        </span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </fieldset>
+        )}
 
         {error && (
           <p className="rounded-xl bg-accent-50 p-3 text-sm font-medium text-accent-700" role="alert">

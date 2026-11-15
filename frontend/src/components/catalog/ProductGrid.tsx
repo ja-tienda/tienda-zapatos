@@ -1,4 +1,5 @@
 import { SearchX } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import type { Product } from '../../types';
 import Reveal from '../ui/Reveal';
 import ProductCard from './ProductCard';
@@ -13,6 +14,7 @@ interface Props {
 const GRID = 'grid grid-cols-2 gap-3 sm:gap-6 md:grid-cols-3 xl:grid-cols-4';
 
 export default function ProductGrid({ products, loading, onOpen, onClearFilters }: Props) {
+  const { isFavorite, toggleFavorite } = useAuth();
   if (loading) {
     return (
       <div className={GRID} aria-busy="true" aria-label="Cargando catálogo">
@@ -52,7 +54,11 @@ export default function ProductGrid({ products, loading, onOpen, onClearFilters 
       {products.map((product, i) => (
         // El retraso crea una cascada por fila (hasta 4 columnas)
         <Reveal key={product.id} delay={(i % 4) * 70} className="flex">
-          <ProductCard product={product} onOpen={onOpen} />
+          <ProductCard
+            product={product}
+            onOpen={onOpen}
+            favorite={{ active: isFavorite(product.id), onToggle: () => toggleFavorite(product.id) }}
+          />
         </Reveal>
       ))}
     </div>

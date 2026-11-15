@@ -1,9 +1,8 @@
-import { Clock, Lock, Mail, MessageCircle } from 'lucide-react';
+import { BookOpenText, Clock, Lock, Mail, MessageCircle } from 'lucide-react';
 import { Link } from 'react-router';
 import { ROUTES, STORE } from '../../config/constants';
 import { useStore } from '../../context/StoreContext';
 import { formatPhone, whatsappUrl } from '../../utils/format';
-import { lastOrder } from '../../utils/orderStore';
 
 const heading = 'text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-400';
 
@@ -11,8 +10,6 @@ const heading = 'text-[11px] font-semibold uppercase tracking-[0.18em] text-ston
 export default function Footer() {
   const { settings, categories, collections, openSizeGuide } = useStore();
   const phone = formatPhone(settings.contactPhone);
-  // Último pedido hecho en este navegador: permite volver a ver su estado o terminar de pagarlo
-  const myOrder = lastOrder();
 
   return (
     <footer className="mt-24 bg-stone-900 text-stone-300">
@@ -105,13 +102,16 @@ export default function Footer() {
                   Guía de tallas
                 </button>
               </li>
-              {myOrder && (
-                <li>
-                  <Link to={ROUTES.order(myOrder.code)} className="hover:text-white">
-                    Seguir mi pedido {myOrder.code}
-                  </Link>
-                </li>
-              )}
+              <li>
+                <Link to={ROUTES.account} className="hover:text-white">
+                  Mi cuenta y mis pedidos
+                </Link>
+              </li>
+              <li>
+                <Link to={ROUTES.returns} className="hover:text-white">
+                  Cambios y devoluciones
+                </Link>
+              </li>
               <li>
                 <Link to={ROUTES.terms} className="hover:text-white">
                   Términos y condiciones
@@ -123,11 +123,18 @@ export default function Footer() {
                 </Link>
               </li>
             </ul>
-            <p className="mt-4 text-stone-400">
-              Yape / Plin: {formatPhone(settings.walletNumber)}
-              <br />
-              {settings.walletHolder}
-            </p>
+            {/* Aviso obligatorio en Perú: acceso visible al Libro de Reclamaciones */}
+            <Link
+              to={ROUTES.complaints}
+              className="mt-4 flex w-fit items-center gap-2 rounded-xl border border-stone-600 px-3 py-2 text-stone-100 transition-colors hover:border-white"
+            >
+              <BookOpenText className="size-5 shrink-0" aria-hidden />
+              <span className="text-xs font-semibold uppercase leading-tight tracking-wide">
+                Libro de
+                <br />
+                Reclamaciones
+              </span>
+            </Link>
           </div>
         </div>
       </div>
@@ -135,7 +142,8 @@ export default function Footer() {
       <div className="border-t border-stone-800">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-4 text-xs text-stone-400 sm:px-6">
           <p>
-            © {new Date().getFullYear()} {STORE.name} · Precios en soles ({STORE.currency})
+            © {new Date().getFullYear()} {settings.businessName || STORE.name}
+            {settings.businessRuc && ` · RUC ${settings.businessRuc}`} · Precios en soles ({STORE.currency})
           </p>
           {/* El panel es una página aparte. target="_top" evita que se abra dentro de la vista previa del panel. */}
           <a href="/admin/" target="_top" rel="nofollow" className="flex items-center gap-1.5 hover:text-stone-200">

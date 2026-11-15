@@ -1,6 +1,7 @@
-import { Check, Flame, ImageOff, Ruler, ShoppingBag } from 'lucide-react';
+import { Check, Flame, Heart, ImageOff, Ruler, Share2, ShoppingBag } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { BADGE_LABELS, GENDER_LABELS } from '../../config/constants';
+import { BADGE_LABELS, GENDER_LABELS, ROUTES } from '../../config/constants';
+import { useAuth } from '../../context/AuthContext';
 import { useCart } from '../../context/CartContext';
 import type { Product } from '../../types';
 import { discountPercent, formatPrice, isOnSale } from '../../utils/format';
@@ -14,8 +15,32 @@ interface Props {
   onOpenSizeGuide: () => void;
 }
 
-export default function ProductDetailModal({ product, initialVariantId, onClose, onOpenSizeGuide }: Props) {
+/**
+ * Detalle de un producto: galería, talla, favoritos, compartir y "Agregar al carrito".
+ * Se usa dentro de la ventana emergente del catálogo y como página propia (/producto/slug),
+ * que es la dirección que se comparte por WhatsApp o Instagram.
+ */
+export function ProductDetailContent({ product, initialVariantId, onClose, onOpenSizeGuide, asPage = false }: Props & { asPage?: boolean }) {
   const { addItem, openCart, quantityOf } = useCart();
+  const { isFavorite, toggleFavorite } = useAuth();
+  const [shared, setShared] = useState(false);
+  const favorite = isFavorite(product.id);
+  const Heading = asPage ? 'h1' : 'h2';
+
+  async function share() {
+    const url = `${window.location.origin}${ROUTES.product(product.slug)}`;
+    try {
+      // En el celular abre el menú nativo (WhatsApp, Instagram…); en computadora copia el enlace
+      if (navigator.share) await navigator.share({ title: product.name, url });
+      else {
+        await navigator.clipboard.writeText(url);
+        setShared(true);
+        setTimeout(() => setShared(false), 2500);
+      }
+    } catch {
+      /* el cliente cerró el menú de compartir */
+    }
+  }
   const [imageIndex, setImageIndex] = useState(0);
   const [variantId, setVariantId] = useState<number | null>(() => {
     const available = product.variants.filter((v) => v.stock > 0);
@@ -52,8 +77,7 @@ export default function ProductDetailModal({ product, initialVariantId, onClose,
   }
 
   return (
-    <Modal title={product.name} onClose={onClose} size="max-w-4xl" hideTitle>
-      <div className="grid md:grid-cols-2">
+    <div className={`grid md:grid-cols-2 ${asPage ? 'overflow-hidden rounded-3xl border border-stone-200/80 bg-white' : ''}`}>
         {/* Galería */}
         <div className="bg-stone-100 p-3 sm:p-4">
           <div className="aspect-square overflow-hidden rounded-2xl bg-stone-200">
@@ -90,7 +114,7 @@ export default function ProductDetailModal({ product, initialVariantId, onClose,
           <p className="pr-10 text-[11px] uppercase tracking-[0.14em] text-stone-500">
             {[product.brand, product.category.name, GENDER_LABELS[product.gender]].filter(Boolean).join(' · ')}
           </p>
-          <h2 className="mt-1.5 font-display text-3xl font-medium leading-tight text-stone-900">{product.name}</h2>
+          <Heading className="mt-1.5 font-display text-3xl font-medium leading-tight text-stone-900">{product.name}</Heading>
 
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="text-2xl font-semibold text-stone-900">{formatPrice(product.price)}</span>
@@ -107,6 +131,28 @@ export default function ProductDetailModal({ product, initialVariantId, onClose,
                 {BADGE_LABELS[product.badge]}
               </span>
             )}
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => toggleFavorite(product.id)}
+              aria-pressed={favorite}
+              className={`flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-semibold transition-colors ${
+                favorite ? 'border-accent-600 bg-accent-50 text-accent-700' : 'border-stone-200 text-stone-700 hover:border-stone-900'
+              }`}
+            >
+              <Heart className={`size-4 ${favorite ? 'fill-accent-600 text-accent-600' : ''}`} aria-hidden />
+              {favorite ? 'En tus favoritos' : 'Guardar en favoritos'}
+            </button>
+            <button
+              type="button"
+              onClick={share}
+              className="flex items-center gap-1.5 rounded-full border border-stone-200 px-3.5 py-2 text-xs font-semibold text-stone-700 transition-colors hover:border-stone-900"
+            >
+              {shared ? <Check className="size-4 text-emerald-600" aria-hidden /> : <Share2 className="size-4" aria-hidden />}
+              <span aria-live="polite">{shared ? '¡Enlace copiado!' : 'Compartir'}</span>
+            </button>
           </div>
 
           {product.description && <p className="mt-4 text-sm leading-relaxed text-stone-600">{product.description}</p>}
@@ -228,7 +274,15 @@ export default function ProductDetailModal({ product, initialVariantId, onClose,
             </div>
           </div>
         </div>
-      </div>
+    </div>
+  );
+}
+
+/** El mismo detalle dentro de una ventana emergente, para no salir del catálogo. */
+export default function ProductDetailModal(props: Props) {
+  return (
+    <Modal title={props.product.name} onClose={props.onClose} size="max-w-4xl" hideTitle>
+      <ProductDetailContent {...props} />
     </Modal>
   );
 }
