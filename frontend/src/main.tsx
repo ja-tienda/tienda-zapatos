@@ -7,6 +7,7 @@ import { CartProvider } from './context/CartContext';
 import { StoreProvider } from './context/StoreContext';
 import './fonts';
 import './index.css';
+import './utils/autoScrollChips';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
