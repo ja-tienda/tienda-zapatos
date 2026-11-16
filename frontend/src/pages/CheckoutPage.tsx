@@ -1,20 +1,20 @@
 import { ArrowLeft, ArrowRight, LoaderCircle, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
+import AuthPanel from '../components/account/AuthPanel';
 import { CartLine, CartNotices } from '../components/cart/CartDrawer';
 import { DELIVERY_OPTIONS, ROUTES, STORAGE_KEYS } from '../config/constants';
+import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { useStore } from '../context/StoreContext';
-import { usePageTitle } from '../hooks/usePageTitle';
+import { usePageMeta } from '../hooks/usePageMeta';
 import { ApiError, api } from '../services/api';
-import type { CheckoutForm } from '../types';
+import type { CartItem, CheckoutForm } from '../types';
 import { formatPrice } from '../utils/format';
-import { lastOrder, saveOrderToken } from '../utils/orderStore';
 
 const EMPTY_FORM: CheckoutForm = {
   customerName: '',
   customerPhone: '',
-  customerEmail: '',
   deliveryMethod: 'DELIVERY_LOCAL',
   address: '',
   notes: '',
@@ -32,18 +32,54 @@ function loadForm(): CheckoutForm {
 const inputClass =
   'mt-1 w-full rounded-xl border border-stone-200 bg-white px-3.5 py-3 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-900 focus:outline-none';
 
-/** Paso 1 de la compra: datos del cliente y de entrega. El pago se elige en la página del pedido. */
+function OrderSummary({ items, subtotal }: { items: CartItem[]; subtotal: number }) {
+  return (
+    <>
+      <h2 className="font-display text-2xl font-medium text-stone-900">Tu pedido</h2>
+      <div className="mt-4 space-y-3">
+        <CartNotices />
+        <ul className="space-y-3">
+          {items.map((item) => (
+            <CartLine key={item.variantId} item={item} compact />
+          ))}
+        </ul>
+      </div>
+      <div className="mt-5 flex items-baseline justify-between border-t border-stone-200 pt-4">
+        <span className="text-sm text-stone-600">Total</span>
+        <span className="text-2xl font-semibold text-stone-900">{formatPrice(subtotal)}</span>
+      </div>
+      <p className="text-xs text-stone-500">El costo de envío se coordina por WhatsApp según tu destino.</p>
+    </>
+  );
+}
+
+/**
+ * Paso 1 de la compra. Aquí es donde por primera vez se pide iniciar sesión o crear cuenta:
+ * antes se puede navegar y llenar el carrito libremente. El carrito vive en este navegador,
+ * así que no se pierde al entrar (ni al volver de Google).
+ */
 export default function CheckoutPage() {
-  const { items, subtotal } = useCart();
+  const { items, subtotal, clearCart } = useCart();
+  const { user, loading: authLoading } = useAuth();
   const { reload } = useStore();
   const navigate = useNavigate();
-  usePageTitle('Finalizar compra');
+  usePageMeta('Finalizar compra');
   const [form, setForm] = useState<CheckoutForm>(loadForm);
   const [errors, setErrors] = useState<Partial<Record<keyof CheckoutForm, string>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Recuerda nombre, teléfono y dirección para la próxima compra (solo en este dispositivo).
+  // Al entrar, el nombre y el teléfono de la cuenta completan lo que esté vacío
+  useEffect(() => {
+    if (!user) return;
+    setForm((f) => ({
+      ...f,
+      customerName: f.customerName || user.name,
+      customerPhone: f.customerPhone || (user.phone ?? ''),
+    }));
+  }, [user]);
+
+  // Recuerda dirección y teléfono para la próxima compra (solo en este dispositivo)
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEYS.checkout, JSON.stringify(form));
@@ -62,7 +98,6 @@ export default function CheckoutPage() {
     const next: typeof errors = {};
     if (form.customerName.trim().length < 3) next.customerName = 'Ingresa tu nombre completo';
     if (!/^\d{9}$/.test(form.customerPhone.replace(/\s/g, ''))) next.customerPhone = 'Ingresa un celular de 9 dígitos';
-    if (form.customerEmail.trim() && !/^\S+@\S+\.\S+$/.test(form.customerEmail.trim())) next.customerEmail = 'Revisa tu correo';
     if (form.deliveryMethod !== 'RECOJO' && form.address.trim().length < 5) {
       next.address = form.deliveryMethod === 'ENVIO_PROVINCIA' ? 'Indica la agencia y ciudad de destino' : 'Indica tu dirección';
     }
@@ -78,19 +113,16 @@ export default function CheckoutPage() {
 
     setSubmitting(true);
     try {
-      // Si el cliente volvió para corregir algo, el pedido anterior sin pagar se descarta
-      // (el servidor solo lo permite si aún no tiene pago ni comprobante).
-      const previous = lastOrder();
-      if (previous) await api.cancelOrder(previous.code, previous.token).catch(() => {});
-
-      const { order, token } = await api.createOrder({
+      // El navegador solo envía qué productos y cuántos: precios, total y stock los decide el servidor
+      const order = await api.createOrder({
         ...form,
         customerName: form.customerName.trim(),
         customerPhone: form.customerPhone.replace(/\s/g, ''),
-        customerEmail: form.customerEmail.trim(),
         items: items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
       });
-      saveOrderToken(order.code, token);
+      // Lo pedido ya quedó apartado en el servidor: el carrito queda libre para otra compra.
+      // Si el cliente vuelve a editar el pedido, sus productos regresan al carrito.
+      clearCart();
       navigate(ROUTES.order(order.code));
     } catch (err) {
       setSubmitError(err instanceof ApiError ? err.message : 'Ocurrió un error inesperado. Inténtalo de nuevo.');
@@ -100,7 +132,7 @@ export default function CheckoutPage() {
     }
   }
 
-  if (items.length === 0) {
+  if (items.length === 0 && !submitting) {
     return (
       <section className="mx-auto max-w-xl px-4 py-24 text-center">
         <h1 className="font-display text-4xl font-medium text-stone-900">Tu carrito está vacío</h1>
@@ -118,13 +150,49 @@ export default function CheckoutPage() {
     );
   }
 
-  return (
-    <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
+  const header = (
+    <>
       <Link to={ROUTES.catalog} className="flex w-fit items-center gap-1.5 text-sm font-medium text-stone-600 hover:text-stone-900">
         <ArrowLeft className="size-4" aria-hidden />
         Seguir comprando
       </Link>
       <h1 className="mt-3 font-display text-4xl font-medium tracking-tight text-stone-900 sm:text-5xl">Finalizar compra</h1>
+    </>
+  );
+
+  if (authLoading) {
+    return (
+      <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
+        {header}
+        <p className="flex items-center justify-center gap-2 py-24 text-sm text-stone-500" aria-busy="true">
+          <LoaderCircle className="size-4 animate-spin" aria-hidden />
+          Un momento…
+        </p>
+      </section>
+    );
+  }
+
+  if (!user) {
+    return (
+      <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
+        {header}
+        <p className="mt-2 text-sm text-stone-500">Entra o crea tu cuenta para continuar. Tu carrito se queda tal como está.</p>
+        <div className="mt-8 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_24rem]">
+          <AuthPanel
+            next={ROUTES.checkout}
+            intro="Con tu cuenta podrás ver el estado de tu pedido y pagar desde cualquier dispositivo."
+          />
+          <aside className="rounded-3xl border border-stone-200/80 bg-white p-5 sm:p-6">
+            <OrderSummary items={items} subtotal={subtotal} />
+          </aside>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
+      {header}
       <p className="mt-2 text-sm text-stone-500">Paso 1 de 2 · Tus datos y la entrega. En el siguiente paso eliges cómo pagar.</p>
 
       <form onSubmit={handleSubmit} noValidate className="mt-8 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_24rem]">
@@ -132,9 +200,12 @@ export default function CheckoutPage() {
           <fieldset className="rounded-3xl border border-stone-200/80 bg-white p-5 sm:p-7">
             <legend className="sr-only">Tus datos</legend>
             <h2 className="font-display text-2xl font-medium text-stone-900">Tus datos</h2>
+            <p className="mt-1 text-sm text-stone-500">
+              Comprando como <strong className="font-semibold text-stone-900">{user.email}</strong>
+            </p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <label className="block text-sm font-medium text-stone-700 sm:col-span-2">
-                Nombre completo
+              <label className="block text-sm font-medium text-stone-700">
+                Nombre de quien recibe
                 <input
                   type="text"
                   autoComplete="name"
@@ -160,20 +231,6 @@ export default function CheckoutPage() {
                   className={`${inputClass} ${errors.customerPhone ? 'border-accent-600' : ''}`}
                 />
                 {errors.customerPhone && <span className="mt-1 block text-xs text-accent-600">{errors.customerPhone}</span>}
-              </label>
-
-              <label className="block text-sm font-medium text-stone-700">
-                Correo <span className="font-normal text-stone-400">(opcional)</span>
-                <input
-                  type="email"
-                  autoComplete="email"
-                  placeholder="Necesario si pagas con tarjeta"
-                  value={form.customerEmail}
-                  onChange={(e) => update('customerEmail', e.target.value)}
-                  aria-invalid={!!errors.customerEmail}
-                  className={`${inputClass} ${errors.customerEmail ? 'border-accent-600' : ''}`}
-                />
-                {errors.customerEmail && <span className="mt-1 block text-xs text-accent-600">{errors.customerEmail}</span>}
               </label>
             </div>
           </fieldset>
@@ -231,21 +288,7 @@ export default function CheckoutPage() {
         </div>
 
         <aside className="rounded-3xl border border-stone-200/80 bg-white p-5 sm:p-6 lg:sticky lg:top-36">
-          <h2 className="font-display text-2xl font-medium text-stone-900">Tu pedido</h2>
-          <div className="mt-4 space-y-3">
-            <CartNotices />
-            <ul className="space-y-3">
-              {items.map((item) => (
-                <CartLine key={item.variantId} item={item} compact />
-              ))}
-            </ul>
-          </div>
-
-          <div className="mt-5 flex items-baseline justify-between border-t border-stone-200 pt-4">
-            <span className="text-sm text-stone-600">Total</span>
-            <span className="text-2xl font-semibold text-stone-900">{formatPrice(subtotal)}</span>
-          </div>
-          <p className="text-xs text-stone-500">El costo de envío se coordina por WhatsApp según tu destino.</p>
+          <OrderSummary items={items} subtotal={subtotal} />
 
           {submitError && (
             <p className="mt-4 flex gap-2 rounded-xl bg-accent-50 p-3 text-sm text-accent-700" role="alert">
@@ -263,9 +306,9 @@ export default function CheckoutPage() {
             {submitting ? 'Creando tu pedido…' : 'Continuar al pago'}
             {!submitting && <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" aria-hidden />}
           </button>
-          <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-stone-500">
-            <ShieldCheck className="size-3.5" aria-hidden />
-            Aún no se cobra nada: primero verás las formas de pago.
+          <p className="mt-3 flex items-start justify-center gap-1.5 text-xs text-stone-500">
+            <ShieldCheck className="mt-px size-3.5 shrink-0" aria-hidden />
+            Aún no se cobra nada. Al continuar apartamos tus productos por 30 minutos mientras pagas.
           </p>
         </aside>
       </form>

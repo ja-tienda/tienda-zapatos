@@ -34,7 +34,14 @@ const createSchema = z.object({
 });
 
 // El tipo (categoría / colección) no se puede cambiar después de crear la sección.
-const updateSchema = z.object(fields).omit({ kind: true }).partial();
+const updateSchema = z
+  .object(fields)
+  .omit({ kind: true })
+  .partial()
+  .extend({
+    // Solo temporadas/colecciones: lista completa de productos que pertenecen a ella
+    productIds: z.array(z.coerce.number().int().positive()).max(1000).optional(),
+  });
 
 /** Cuenta solo productos visibles, para mostrar "6 modelos" en la tienda. */
 const withCounts = (activeOnly: boolean) =>
@@ -89,15 +96,24 @@ export async function createSection(req: Request, res: Response) {
 /** PUT /api/sections/:id (admin) */
 export async function updateSection(req: Request, res: Response) {
   const id = parseId(req.params.id);
-  const data = updateSchema.parse(req.body);
+  const { productIds, ...data } = updateSchema.parse(req.body);
   const current = await prisma.section.findUnique({ where: { id } });
   if (!current) throw new HttpError(404, 'Sección no encontrada');
+  if (productIds && current.kind !== 'COLECCION') {
+    throw new HttpError(400, 'Los productos de una categoría se cambian editando cada producto');
+  }
+  // Se ignoran ids de productos que ya no existen
+  const existingIds = productIds
+    ? (await prisma.product.findMany({ where: { id: { in: productIds } }, select: { id: true } })).map((p) => p.id)
+    : undefined;
 
   const section = await prisma.section.update({
     where: { id },
     data: {
       ...data,
       ...(data.name && data.name !== current.name ? { slug: await uniqueSlug(data.name, id) } : {}),
+      // "set" reemplaza la lista: marca los elegidos y desmarca el resto
+      ...(existingIds ? { collectionProducts: { set: existingIds.map((pid) => ({ id: pid })) } } : {}),
     },
     include: withCounts(false),
   });

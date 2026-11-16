@@ -1,4 +1,4 @@
-import { ImageOff } from 'lucide-react';
+import { Heart, ImageOff } from 'lucide-react';
 import { useState } from 'react';
 import { BADGE_LABELS, GENDER_LABELS } from '../../config/constants';
 import { useTilt } from '../../hooks/useTilt';
@@ -9,6 +9,8 @@ interface Props {
   product: Product;
   /** Abre el detalle; si se pasa una talla, llega preseleccionada. */
   onOpen: (product: Product, variantId?: number) => void;
+  /** Botón de corazón. Sin esta propiedad no se muestra (p. ej. en la vista previa del panel). */
+  favorite?: { active: boolean; onToggle: () => void };
 }
 
 const BADGE_STYLES: Record<Badge, string> = {
@@ -17,7 +19,7 @@ const BADGE_STYLES: Record<Badge, string> = {
   ULTIMO_PAR: 'bg-stone-900 text-white',
 };
 
-export default function ProductCard({ product, onOpen }: Props) {
+export default function ProductCard({ product, onOpen, favorite }: Props) {
   const tiltRef = useTilt<HTMLElement>(5);
   // La segunda foto solo se descarga cuando alguien pasa el mouse (ahorra datos en celulares).
   const [showAlt, setShowAlt] = useState(false);
@@ -31,8 +33,19 @@ export default function ProductCard({ product, onOpen }: Props) {
       onPointerEnter={(e) => {
         if (e.pointerType === 'mouse') setShowAlt(true);
       }}
-      className="tilt group flex w-full flex-col overflow-hidden rounded-3xl border border-stone-200/70 bg-white hover:shadow-soft"
+      className="tilt group relative flex w-full flex-col overflow-hidden rounded-3xl border border-stone-200/70 bg-white hover:shadow-soft"
     >
+      {favorite && (
+        <button
+          type="button"
+          onClick={favorite.onToggle}
+          aria-pressed={favorite.active}
+          aria-label={favorite.active ? `Quitar ${product.name} de favoritos` : `Guardar ${product.name} en favoritos`}
+          className="absolute right-3 top-3 z-10 grid size-9 place-items-center rounded-full bg-white/90 text-stone-700 shadow-sm backdrop-blur transition-transform hover:scale-110"
+        >
+          <Heart className={`size-[18px] ${favorite.active ? 'fill-accent-600 text-accent-600' : ''}`} aria-hidden />
+        </button>
+      )}
       <button
         type="button"
         onClick={() => onOpen(product)}

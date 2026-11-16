@@ -5,7 +5,7 @@ import SectionNav from '../components/catalog/SectionNav';
 import SectionHero, { type SectionHeroData } from '../components/layout/SectionHero';
 import { SECTION_KIND_LABELS } from '../config/constants';
 import { useStore } from '../context/StoreContext';
-import { usePageTitle } from '../hooks/usePageTitle';
+import { usePageMeta } from '../hooks/usePageMeta';
 import { isOnSale } from '../utils/format';
 import NotFoundPage from './NotFoundPage';
 
@@ -20,7 +20,7 @@ export default function SectionPage({ offers = false }: { offers?: boolean }) {
 
   const section = offers ? null : ([...categories, ...collections].find((s) => s.slug === slug) ?? null);
 
-  usePageTitle(offers ? 'Ofertas' : section?.name);
+  usePageMeta(offers ? 'Ofertas' : section?.name);
 
   const sectionProducts = useMemo(() => {
     if (offers) return products.filter(isOnSale);

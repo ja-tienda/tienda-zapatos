@@ -37,6 +37,11 @@ export const FALLBACK_SETTINGS: Settings = {
   walletNumber: '957433392',
   walletHolder: 'Jessica Paola Ramos Luján',
   walletQrUrl: '',
+  businessName: '',
+  businessRuc: '',
+  businessAddress: '',
+  seoDescription: '',
+  returnsText: '',
   termsText: '',
   privacyText: '',
   cardPaymentsEnabled: false,
@@ -111,8 +116,19 @@ export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   PENDIENTE: 'Pendiente',
-  CONFIRMADO: 'Confirmado',
+  PAGADO: 'Pagado',
+  ENVIADO: 'Enviado',
+  ENTREGADO: 'Entregado',
   CANCELADO: 'Cancelado',
+};
+
+/** Colores de la etiqueta de cada estado (tienda y panel). */
+export const ORDER_STATUS_STYLES: Record<OrderStatus, string> = {
+  PENDIENTE: 'bg-amber-100 text-amber-800',
+  PAGADO: 'bg-emerald-100 text-emerald-800',
+  ENVIADO: 'bg-sky-100 text-sky-800',
+  ENTREGADO: 'bg-stone-900 text-white',
+  CANCELADO: 'bg-stone-200 text-stone-600',
 };
 
 // ---- Tallas ----
@@ -162,10 +178,9 @@ export const CLOTHING_SIZE_TABLE: { size: string; chest: string; waist: string }
 
 export const STORAGE_KEYS = {
   cart: 'ja_cart_v1',
-  checkout: 'ja_checkout_v2',
-  /** { "JA-XXXXX": "clave secreta" } — pedidos creados en este navegador */
-  orders: 'ja_orders_v1',
-  adminToken: 'ja_admin_token',
+  checkout: 'ja_checkout_v3',
+  /** Favoritos marcados sin haber iniciado sesión; al entrar se pasan a la cuenta */
+  favorites: 'ja_favorites_v1',
 } as const;
 
 /** Rutas de la tienda en un solo lugar. */
@@ -174,8 +189,14 @@ export const ROUTES = {
   catalog: '/#catalogo',
   offers: '/ofertas',
   section: (slug: string) => `/seccion/${slug}`,
+  product: (slug: string) => `/producto/${slug}`,
   checkout: '/checkout',
   order: (code: string) => `/pedido/${code}`,
+  account: '/cuenta',
+  forgot: '/recuperar',
+  reset: '/restablecer',
   terms: '/terminos',
   privacy: '/privacidad',
+  returns: '/cambios-y-devoluciones',
+  complaints: '/libro-de-reclamaciones',
 } as const;

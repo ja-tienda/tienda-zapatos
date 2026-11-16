@@ -1,10 +1,12 @@
 import { ExternalLink, LoaderCircle, LogOut, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FALLBACK_SETTINGS, STORAGE_KEYS, STORE } from '../config/constants';
+import { FALLBACK_SETTINGS, STORE } from '../config/constants';
 import { ApiError, api } from '../services/api';
 import { notifyCatalogChanged } from '../services/catalogSync';
 import type {
   AdminSummary,
+  Complaint,
+  Customer,
   EditableSettings,
   Order,
   OrderStatus,
@@ -14,8 +16,12 @@ import type {
   SectionInput,
   SectionKind,
   Settings,
+  User,
 } from '../types';
 import { AdminContext, type AdminContextValue } from './AdminContext';
+import AccessPanel from './components/AccessPanel';
+import ComplaintsPanel from './components/ComplaintsPanel';
+import CustomersPanel from './components/CustomersPanel';
 import LoginScreen from './components/LoginScreen';
 import OrdersPanel from './components/OrdersPanel';
 import ProductForm from './components/ProductForm';
@@ -29,24 +35,19 @@ import StorePreview from './components/StorePreview';
 const TABS = [
   { id: 'productos', label: 'Productos y stock' },
   { id: 'pedidos', label: 'Pedidos' },
+  { id: 'clientes', label: 'Clientes' },
+  { id: 'reclamos', label: 'Reclamos' },
   { id: 'secciones', label: 'Secciones' },
   { id: 'apariencia', label: 'Apariencia' },
   { id: 'tienda', label: 'Contacto y pagos' },
+  { id: 'acceso', label: 'Mi acceso' },
   { id: 'vista-previa', label: 'Vista previa' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
 
-/** Cada cuánto se revisa si entraron pedidos nuevos. */
-const ORDERS_REFRESH_MS = 30_000;
-
-function readToken(): string | null {
-  try {
-    return sessionStorage.getItem(STORAGE_KEYS.adminToken);
-  } catch {
-    return null;
-  }
-}
+/** Cada cuánto se revisa si entraron pedidos o reclamos nuevos. */
+const REFRESH_MS = 30_000;
 
 function tabFromHash(): TabId {
   const hash = window.location.hash.slice(1);
@@ -54,7 +55,9 @@ function tabFromHash(): TabId {
 }
 
 export default function AdminApp() {
-  const [token, setToken] = useState<string | null>(readToken);
+  /** undefined = comprobando si ya hay sesión · null = sin sesión */
+  const [admin, setAdmin] = useState<User | null | undefined>(undefined);
+  const [loginNotice, setLoginNotice] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>(tabFromHash);
   /** undefined = lista · null = producto nuevo · Product = editando */
   const [editingProduct, setEditingProduct] = useState<Product | null | undefined>(undefined);
@@ -63,10 +66,23 @@ export default function AdminApp() {
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [settings, setSettings] = useState<Settings>(FALLBACK_SETTINGS);
   const [summary, setSummary] = useState<AdminSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ¿Ya había una sesión de administración abierta en este navegador?
+  useEffect(() => {
+    api
+      .me()
+      .then(({ user }) => {
+        if (user && user.role !== 'ADMIN') setLoginNotice('Tienes abierta una cuenta de cliente. Entra con tu usuario de administración.');
+        setAdmin(user?.role === 'ADMIN' ? user : null);
+      })
+      .catch(() => setAdmin(null));
+  }, []);
 
   const closeForms = () => {
     setEditingProduct(undefined);
@@ -90,25 +106,16 @@ export default function AdminApp() {
     history.replaceState(null, '', `#${next}`);
   };
 
-  const logout = useCallback(() => {
-    try {
-      sessionStorage.removeItem(STORAGE_KEYS.adminToken);
-    } catch {
-      /* sin almacenamiento */
-    }
-    setToken(null);
-  }, []);
-
-  /** Ejecuta una llamada autenticada. Si la sesión venció, vuelve a pedir el PIN. */
+  /** Ejecuta una llamada del panel. Si la sesión venció (401), vuelve a pedir usuario y contraseña. */
   const call = useCallback(
-    async <T,>(fn: (token: string) => Promise<T>, options: { rethrow?: boolean; silent?: boolean } = {}): Promise<T | undefined> => {
-      if (!token) return undefined;
+    async <T,>(fn: () => Promise<T>, options: { rethrow?: boolean; silent?: boolean } = {}): Promise<T | undefined> => {
       try {
         if (!options.silent) setError(null);
-        return await fn(token);
+        return await fn();
       } catch (err) {
-        if (err instanceof ApiError && err.status === 401) {
-          logout();
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+          setLoginNotice('Tu sesión venció. Vuelve a entrar.');
+          setAdmin(null);
           return undefined;
         }
         if (options.rethrow) throw err;
@@ -116,57 +123,58 @@ export default function AdminApp() {
         return undefined;
       }
     },
-    [token, logout],
+    [],
   );
 
-  const refreshOrders = useCallback(
+  const refreshInbox = useCallback(
     async (silent = false) => {
-      const [o, s] = await Promise.all([
-        call((t) => api.getOrders(t), { silent }),
-        call((t) => api.getSummary(t), { silent }),
+      const [o, s, c] = await Promise.all([
+        call(() => api.getOrders(), { silent }),
+        call(() => api.getSummary(), { silent }),
+        call(() => api.getComplaints(), { silent }),
       ]);
       if (o) setOrders(o);
       if (s) setSummary(s);
+      if (c) setComplaints(c);
     },
     [call],
   );
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    const [p, sec, set] = await Promise.all([
-      call((t) => api.getAllProducts(t)),
-      call((t) => api.getAllSections(t)),
+    const [p, sec, set, cus] = await Promise.all([
+      call(() => api.getAllProducts()),
+      call(() => api.getAllSections()),
       call(() => api.getSettings()),
-      refreshOrders(),
+      call(() => api.getCustomers()),
+      refreshInbox(),
     ]);
     if (p) setProducts(p);
     if (sec) setSections(sec);
     if (set) setSettings(set);
+    if (cus) setCustomers(cus);
     setLoading(false);
-  }, [call, refreshOrders]);
+  }, [call, refreshInbox]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!admin) return;
     void loadAll();
     const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') void refreshOrders(true);
-    }, ORDERS_REFRESH_MS);
+      if (document.visibilityState === 'visible') void refreshInbox(true);
+    }, REFRESH_MS);
     return () => clearInterval(interval);
-  }, [token, loadAll, refreshOrders]);
+  }, [admin, loadAll, refreshInbox]);
 
-  function handleLogin(newToken: string) {
-    try {
-      sessionStorage.setItem(STORAGE_KEYS.adminToken, newToken);
-    } catch {
-      /* sin almacenamiento: la sesión dura hasta cerrar la pestaña */
-    }
-    setToken(newToken);
+  async function logout() {
+    await api.logout().catch(() => {});
+    setLoginNotice(null);
+    setAdmin(null);
   }
 
   /** Tras cualquier cambio: avisa a la tienda (se actualiza al instante) y refresca los contadores. */
   function storeChanged() {
     notifyCatalogChanged();
-    void call((t) => api.getSummary(t), { silent: true }).then((s) => s && setSummary(s));
+    void call(() => api.getSummary(), { silent: true }).then((s) => s && setSummary(s));
   }
 
   // ---------- Productos ----------
@@ -179,18 +187,26 @@ export default function AdminApp() {
   }
 
   const stockActions: StockActions = {
-    changeStock: async (id, delta) => applyProduct(await call((t) => api.patchVariant(t, id, { delta }))),
-    setStock: async (id, stock) => applyProduct(await call((t) => api.patchVariant(t, id, { stock }))),
-    toggleVariant: async (id, isActive) => applyProduct(await call((t) => api.patchVariant(t, id, { isActive }))),
-    deleteVariant: async (id) => applyProduct(await call((t) => api.deleteVariant(t, id))),
-    addVariant: async (productId, size) => applyProduct(await call((t) => api.addVariant(t, productId, { size, stock: 0 }))),
+    changeStock: async (id, delta) => applyProduct(await call(() => api.patchVariant(id, { delta }))),
+    setStock: async (id, stock) => applyProduct(await call(() => api.patchVariant(id, { stock }))),
+    toggleVariant: async (id, isActive) => applyProduct(await call(() => api.patchVariant(id, { isActive }))),
+    deleteVariant: async (id) => applyProduct(await call(() => api.deleteVariant(id))),
+    addVariant: async (productId, size) => applyProduct(await call(() => api.addVariant(productId, { size, stock: 0 }))),
   };
+
+  async function refreshProducts() {
+    const fresh = await call(() => api.getAllProducts(), { silent: true });
+    if (fresh) setProducts(fresh);
+  }
+
+  async function refreshSections() {
+    const fresh = await call(() => api.getAllSections(), { silent: true });
+    if (fresh) setSections(fresh);
+  }
 
   async function saveProduct(data: ProductInput) {
     const target = editingProduct;
-    const saved = await call((t) => (target ? api.updateProduct(t, target.id, data) : api.createProduct(t, data)), {
-      rethrow: true,
-    });
+    const saved = await call(() => (target ? api.updateProduct(target.id, data) : api.createProduct(data)), { rethrow: true });
     if (!saved) return;
     applyProduct(saved);
     setLastSavedId(saved.id);
@@ -200,8 +216,8 @@ export default function AdminApp() {
 
   async function removeProduct(product: Product) {
     if (!confirm(`¿Eliminar "${product.name}" y todas sus tallas? Esta acción no se puede deshacer.`)) return;
-    const ok = await call(async (t) => {
-      await api.deleteProduct(t, product.id);
+    const ok = await call(async () => {
+      await api.deleteProduct(product.id);
       return true;
     });
     if (!ok) return;
@@ -211,28 +227,27 @@ export default function AdminApp() {
   }
 
   // ---------- Secciones ----------
-  async function refreshSections() {
-    const fresh = await call((t) => api.getAllSections(t), { silent: true });
-    if (fresh) setSections(fresh);
-  }
-
-  async function saveSection(data: SectionInput) {
+  async function saveSection(data: SectionInput, productIds?: number[]) {
     const target = editingSection?.section;
     const { kind: _kind, ...changes } = data;
-    const saved = await call((t) => (target ? api.updateSection(t, target.id, changes) : api.createSection(t, data)), {
-      rethrow: true,
-    });
+    const saved = await call(
+      async () => {
+        if (target) return api.updateSection(target.id, { ...changes, productIds });
+        const created = await api.createSection(data);
+        // Una temporada nueva recibe sus productos en un segundo paso
+        return productIds?.length ? api.updateSection(created.id, { productIds }) : created;
+      },
+      { rethrow: true },
+    );
     if (!saved) return;
     setEditingSection(undefined);
-    await refreshSections();
-    // El nombre de una categoría viaja dentro de cada producto: se recargan para reflejarlo
-    const fresh = await call((t) => api.getAllProducts(t), { silent: true });
-    if (fresh) setProducts(fresh);
+    // El nombre de una categoría y las temporadas viajan dentro de cada producto: se recargan
+    await Promise.all([refreshSections(), refreshProducts()]);
     storeChanged();
   }
 
   async function toggleSection(section: Section) {
-    const saved = await call((t) => api.updateSection(t, section.id, { isActive: !section.isActive }));
+    const saved = await call(() => api.updateSection(section.id, { isActive: !section.isActive }));
     if (!saved) return;
     await refreshSections();
     storeChanged();
@@ -241,49 +256,87 @@ export default function AdminApp() {
   async function removeSection(section: Section) {
     const what = section.kind === 'CATEGORIA' ? 'la categoría' : 'la temporada';
     if (!confirm(`¿Eliminar ${what} "${section.name}"? Sus productos no se borran. Esta acción no se puede deshacer.`)) return;
-    const ok = await call(async (t) => {
-      await api.deleteSection(t, section.id);
+    const ok = await call(async () => {
+      await api.deleteSection(section.id);
       return true;
     });
     if (!ok) return;
-    await refreshSections();
+    await Promise.all([refreshSections(), refreshProducts()]);
     storeChanged();
   }
 
   // ---------- Ajustes ----------
   async function saveSettings(changes: Partial<EditableSettings>) {
-    const saved = await call((t) => api.updateSettings(t, changes), { rethrow: true });
-    if (!saved) throw new Error('Tu sesión venció. Ingresa tu PIN otra vez.');
+    const saved = await call(() => api.updateSettings(changes), { rethrow: true });
+    if (!saved) throw new Error('Tu sesión venció. Vuelve a entrar.');
     setSettings(saved);
     notifyCatalogChanged();
   }
 
   // ---------- Pedidos ----------
-  async function setOrderStatus(orderId: number, status: OrderStatus) {
-    const updated = await call((t) => api.setOrderStatus(t, orderId, status));
-    if (!updated) return;
+  async function setOrderStatus(orderId: number, status: OrderStatus): Promise<Order | undefined> {
+    const updated = await call(() => api.setOrderStatus(orderId, status));
+    if (!updated) return undefined;
     setOrders((list) => list.map((o) => (o.id === updated.id ? updated : o)));
-    // Confirmar o cancelar mueve stock: se recarga el inventario.
-    const fresh = await call((t) => api.getAllProducts(t));
-    if (fresh) setProducts(fresh);
+    // Cancelar devuelve stock al inventario: se recarga. También cambia lo comprado por el cliente.
+    await refreshProducts();
+    void call(() => api.getCustomers(), { silent: true }).then((fresh) => fresh && setCustomers(fresh));
     storeChanged();
+    return updated;
+  }
+
+  // ---------- Clientes y reclamos ----------
+  async function setCustomerActive(customer: Customer, isActive: boolean) {
+    const result = await call(() => api.setCustomerActive(customer.id, isActive));
+    if (result) setCustomers((list) => list.map((c) => (c.id === customer.id ? { ...c, isActive: result.isActive } : c)));
+  }
+
+  async function respondComplaint(id: number, response: string): Promise<boolean> {
+    const result = await call(() => api.respondComplaint(id, response));
+    if (!result) return true; // el error ya se muestra arriba
+    setComplaints((list) => list.map((c) => (c.id === id ? result : c)));
+    storeChanged();
+    return result.emailSent;
   }
 
   const adminContext = useMemo<AdminContextValue>(
     () => ({
       upload: async (file, folder) => {
-        const result = await call((t) => api.uploadImage(t, file, folder), { rethrow: true });
-        if (!result) throw new Error('Tu sesión venció. Ingresa tu PIN otra vez.');
+        const result = await call(() => api.uploadImage(file, folder), { rethrow: true });
+        if (!result) throw new Error('Tu sesión venció. Vuelve a entrar.');
         return result.url;
       },
     }),
     [call],
   );
 
-  if (!token) return <LoginScreen onLogin={handleLogin} />;
+  if (admin === undefined) {
+    return (
+      <main className="grid min-h-dvh place-items-center bg-stone-900 text-stone-300">
+        <LoaderCircle className="size-6 animate-spin" aria-label="Cargando" />
+      </main>
+    );
+  }
+
+  if (!admin) {
+    return (
+      <LoginScreen
+        key={loginNotice ?? 'login'}
+        notice={loginNotice}
+        onLogin={(user) => {
+          setLoginNotice(null);
+          setAdmin(user);
+        }}
+      />
+    );
+  }
 
   const categories = sections.filter((s) => s.kind === 'CATEGORIA');
   const collections = sections.filter((s) => s.kind === 'COLECCION');
+  const badges: Partial<Record<TabId, number | undefined>> = {
+    pedidos: summary?.pendingOrders,
+    reclamos: summary?.pendingComplaints,
+  };
 
   return (
     <AdminContext.Provider value={adminContext}>
@@ -295,7 +348,7 @@ export default function AdminApp() {
             </span>
             <div className="min-w-0 leading-tight">
               <p className="truncate text-sm font-bold">Panel de administración</p>
-              <p className="truncate text-xs text-stone-400">{STORE.tagline}</p>
+              <p className="truncate text-xs text-stone-400">{admin.email}</p>
             </div>
             <a
               href="/"
@@ -308,7 +361,7 @@ export default function AdminApp() {
             </a>
             <button
               type="button"
-              onClick={logout}
+              onClick={() => void logout()}
               className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium text-stone-300 hover:bg-stone-800 hover:text-white"
             >
               <LogOut className="size-4" aria-hidden />
@@ -328,9 +381,9 @@ export default function AdminApp() {
                 }`}
               >
                 {t.label}
-                {t.id === 'pedidos' && !!summary?.pendingOrders && (
+                {!!badges[t.id] && (
                   <span className="grid min-w-5 place-items-center rounded-full bg-accent-600 px-1.5 text-xs font-bold leading-5 text-white">
-                    {summary.pendingOrders}
+                    {badges[t.id]}
                   </span>
                 )}
               </button>
@@ -352,16 +405,28 @@ export default function AdminApp() {
             </p>
           ) : tab === 'vista-previa' ? (
             <StorePreview />
+          ) : tab === 'acceso' ? (
+            <AccessPanel user={admin} />
           ) : tab === 'apariencia' ? (
             <AppearancePanel settings={settings} onSave={saveSettings} />
           ) : tab === 'tienda' ? (
             <StorePanel settings={settings} onSave={saveSettings} />
+          ) : tab === 'clientes' ? (
+            <CustomersPanel
+              customers={customers}
+              loadOrders={(id) => api.getCustomerOrders(id)}
+              onSetActive={setCustomerActive}
+              onSetOrderStatus={setOrderStatus}
+            />
+          ) : tab === 'reclamos' ? (
+            <ComplaintsPanel complaints={complaints} onRespond={respondComplaint} />
           ) : tab === 'secciones' ? (
             editingSection ? (
               <SectionForm
                 key={editingSection.section?.id ?? `new-${editingSection.kind}`}
                 section={editingSection.section}
                 kind={editingSection.kind}
+                products={products}
                 onSave={saveSection}
                 onCancel={() => setEditingSection(undefined)}
               />
@@ -380,14 +445,19 @@ export default function AdminApp() {
                 <h1 className="text-xl font-extrabold text-stone-900">Pedidos</h1>
                 <button
                   type="button"
-                  onClick={() => refreshOrders()}
+                  onClick={() => refreshInbox()}
                   className="flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-3.5 py-2 text-sm font-semibold text-stone-700 hover:border-stone-900"
                 >
                   <RefreshCw className="size-4" aria-hidden />
                   Actualizar
                 </button>
               </div>
-              <OrdersPanel orders={orders} onSetStatus={setOrderStatus} />
+              <OrdersPanel
+                orders={orders}
+                onSetStatus={async (id, status) => {
+                  await setOrderStatus(id, status);
+                }}
+              />
             </div>
           ) : editingProduct !== undefined ? (
             <ProductForm
@@ -406,9 +476,7 @@ export default function AdminApp() {
               initialExpandedId={lastSavedId}
               onNew={() => setEditingProduct(null)}
               onEdit={(product) => setEditingProduct(product)}
-              onToggleActive={async (product) =>
-                applyProduct(await call((t) => api.patchProduct(t, product.id, { isActive: !product.isActive })))
-              }
+              onToggleActive={async (product) => applyProduct(await call(() => api.patchProduct(product.id, { isActive: !product.isActive })))}
               onDelete={removeProduct}
             />
           )}

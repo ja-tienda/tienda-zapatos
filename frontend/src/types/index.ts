@@ -4,7 +4,19 @@ export type SectionKind = 'CATEGORIA' | 'COLECCION';
 export type SizeType = 'CALZADO' | 'ROPA' | 'UNICA';
 export type DeliveryMethod = 'DELIVERY_LOCAL' | 'ENVIO_PROVINCIA' | 'RECOJO';
 export type PaymentMethod = 'YAPE' | 'PLIN' | 'TRANSFERENCIA' | 'CONTRA_ENTREGA' | 'TARJETA';
-export type OrderStatus = 'PENDIENTE' | 'CONFIRMADO' | 'CANCELADO';
+export type OrderStatus = 'PENDIENTE' | 'PAGADO' | 'ENVIADO' | 'ENTREGADO' | 'CANCELADO';
+export type Role = 'ADMIN' | 'CUSTOMER';
+
+/** Cuenta con sesión iniciada (cliente o administradora). Nunca incluye la contraseña. */
+export interface User {
+  id: number;
+  name: string;
+  email: string;
+  phone: string | null;
+  role: Role;
+  hasPassword: boolean;
+  hasGoogle: boolean;
+}
 
 /** Sección con página propia: categoría (Calzados…) o colección/temporada (Verano…). */
 export interface Section {
@@ -86,6 +98,11 @@ export interface Settings {
   walletNumber: string;
   walletHolder: string;
   walletQrUrl: string;
+  businessName: string;
+  businessRuc: string;
+  businessAddress: string;
+  seoDescription: string;
+  returnsText: string;
   termsText: string;
   privacyText: string;
   /** Solo lectura: indica si el servidor tiene configuradas las claves de Izipay. */
@@ -109,7 +126,6 @@ export interface CartItem {
 export interface CheckoutForm {
   customerName: string;
   customerPhone: string;
-  customerEmail: string;
   deliveryMethod: DeliveryMethod;
   address: string;
   notes: string;
@@ -137,9 +153,15 @@ export interface Order {
   notes: string | null;
   total: number;
   status: OrderStatus;
-  receiptUrl: string | null;
-  paymentRef: string | null;
+  /** El cliente ya envió la captura de su pago */
+  hasReceipt: boolean;
+  /** Solo en el panel: ruta protegida para ver la captura */
+  receiptUrl?: string | null;
+  paymentRef?: string | null;
+  userId?: number | null;
   paidAt: string | null;
+  /** Hasta cuándo se guarda el stock si aún no paga (null = no vence sola) */
+  reservedUntil: string | null;
   createdAt: string;
   items: OrderItem[];
 }
@@ -150,6 +172,73 @@ export interface AdminSummary {
   pendingOrders: number;
   lowStock: number;
   outOfStock: number;
+  pendingComplaints: number;
+  customers: number;
+}
+
+/** Cliente registrado, como lo ve la administradora. */
+export interface Customer {
+  id: number;
+  name: string;
+  email: string;
+  phone: string | null;
+  isActive: boolean;
+  withGoogle: boolean;
+  createdAt: string;
+  lastLoginAt: string | null;
+  orderCount: number;
+  favoriteCount: number;
+  totalSpent: number;
+}
+
+export type ComplaintType = 'RECLAMO' | 'QUEJA';
+
+/** Lo que llena el consumidor en el Libro de Reclamaciones. */
+export interface ComplaintInput {
+  type: ComplaintType;
+  customerName: string;
+  documentType: 'DNI' | 'CE' | 'PASAPORTE';
+  documentNumber: string;
+  phone: string;
+  email: string;
+  address: string;
+  guardianName: string;
+  itemType: 'PRODUCTO' | 'SERVICIO';
+  itemDescription: string;
+  amount: number | null;
+  orderCode: string;
+  detail: string;
+  request: string;
+  acceptTerms: boolean;
+}
+
+export interface Complaint extends Omit<ComplaintInput, 'acceptTerms' | 'guardianName' | 'orderCode'> {
+  id: number;
+  code: string;
+  guardianName: string | null;
+  orderCode: string | null;
+  status: 'PENDIENTE' | 'ATENDIDO';
+  response: string | null;
+  respondedAt: string | null;
+  createdAt: string;
+}
+
+/** Diagnóstico del servidor para comprobar la configuración tras desplegar. */
+export interface Diagnostics {
+  production: boolean;
+  appUrl: string;
+  apiUrl: string;
+  yourIp: string | null;
+  forwardedFor: string | null;
+  trustProxy: number;
+  https: boolean;
+  cookieSameSite: string;
+  googleLogin: boolean;
+  emails: boolean;
+  cardPayments: boolean;
+  cardPaymentsMode: string | null;
+  googleRedirectUri: string;
+  izipayNotificationUrl: string;
 }
 
 export type SortOption = 'DESTACADOS' | 'PRECIO_ASC' | 'PRECIO_DESC';

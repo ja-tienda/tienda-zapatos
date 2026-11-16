@@ -50,9 +50,26 @@ enum PaymentMethod {
 }
 
 enum OrderStatus {
-  PENDIENTE // pedido creado, aún sin pago verificado
-  CONFIRMADO // pago verificado (por Jessica o por la pasarela): aquí se descuenta el stock
-  CANCELADO
+  PENDIENTE // pedido creado (su stock queda reservado), aún sin pago verificado
+  PAGADO // pago verificado: por la administradora (Yape/Plin) o por la notificación de Izipay
+  ENVIADO
+  ENTREGADO
+  CANCELADO // el stock reservado vuelve al inventario
+}
+
+enum Role {
+  ADMIN
+  CUSTOMER
+}
+
+enum ComplaintType {
+  RECLAMO // disconformidad con el producto o servicio
+  QUEJA // malestar con la atención
+}
+
+enum ComplaintStatus {
+  PENDIENTE
+  ATENDIDO
 }
 
 /// Sección de la tienda con página propia (/seccion/slug): categorías y colecciones/temporadas.
@@ -98,6 +115,7 @@ model Product {
   updatedAt     DateTime         @updatedAt
   variants      ProductVariant[]
   orderItems    OrderItem[]
+  favorites     Favorite[]
 
   @@index([categoryId])
   @@index([isActive])
@@ -122,8 +140,9 @@ model ProductVariant {
 model Order {
   id             Int            @id @default(autoincrement())
   code           String         @unique // código corto que el cliente escribe en su Yape y viaja por WhatsApp
-  // Clave secreta que solo conoce el navegador del cliente: le permite ver y pagar SU pedido
-  publicToken    String         @default("")
+  // Dueño del pedido. Queda en null si la cuenta se elimina (el pedido se conserva).
+  userId         Int?
+  user           User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
   customerName   String
   customerPhone  String
   customerEmail  String?
@@ -136,10 +155,15 @@ model Order {
   receiptUrl     String? // captura del pago por Yape/Plin
   paymentRef     String? // identificador de la transacción en la pasarela (tarjeta)
   paidAt         DateTime?
+  // true = las unidades de este pedido ya se descontaron del inventario al crearlo
+  stockReserved  Boolean        @default(false)
+  // Hasta cuándo se guarda la reserva si el cliente no paga. null = no vence sola.
+  reservedUntil  DateTime?
   createdAt      DateTime       @default(now())
   items          OrderItem[]
 
   @@index([status])
+  @@index([userId])
   @@index([createdAt])
 }
 
@@ -164,4 +188,97 @@ model OrderItem {
 model Setting {
   key   String @id
   value String
+}
+
+/// Cuentas: la administradora (role ADMIN) y los clientes (role CUSTOMER).
+model User {
+  id              Int       @id @default(autoincrement())
+  email           String    @unique // siempre en minúsculas
+  username        String?   @unique // solo la administradora: alternativa al correo para entrar
+  name            String
+  phone           String?
+  // null = la cuenta solo entra con Google (o aún no definió contraseña)
+  passwordHash    String?
+  googleId        String?   @unique
+  role            Role      @default(CUSTOMER)
+  isActive        Boolean   @default(true)
+  emailVerifiedAt DateTime?
+  // Bloqueo temporal tras varios intentos fallidos de inicio de sesión
+  failedLogins    Int       @default(0)
+  lockedUntil     DateTime?
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  sessions    Session[]
+  resetTokens PasswordResetToken[]
+  orders      Order[]
+  favorites   Favorite[]
+
+  @@index([role])
+}
+
+/// Sesión iniciada. El navegador guarda un valor aleatorio en una cookie httpOnly;
+/// aquí solo se guarda su huella (SHA-256), así una copia de la BD no sirve para entrar.
+model Session {
+  id        String   @id
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Enlace de un solo uso para restablecer la contraseña (se guarda solo su huella).
+model PasswordResetToken {
+  id        Int       @id @default(autoincrement())
+  tokenHash String    @unique
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model Favorite {
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId Int
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, productId])
+}
+
+/// Hoja del Libro de Reclamaciones virtual (Código de Protección y Defensa del Consumidor).
+model Complaint {
+  id              Int             @id @default(autoincrement())
+  code            String          @unique // correlativo: LR-2026-000001
+  type            ComplaintType
+  // Consumidor
+  customerName    String
+  documentType    String // DNI, CE, Pasaporte
+  documentNumber  String
+  phone           String
+  email           String
+  address         String
+  guardianName    String? // padre, madre o apoderado si es menor de edad
+  // Bien contratado
+  itemType        String // PRODUCTO o SERVICIO
+  itemDescription String
+  amount          Decimal?        @db.Decimal(10, 2)
+  orderCode       String?
+  // Reclamo
+  detail          String
+  request         String // lo que pide el consumidor
+  // Respuesta del proveedor
+  status          ComplaintStatus @default(PENDIENTE)
+  response        String?
+  respondedAt     DateTime?
+  createdAt       DateTime        @default(now())
+
+  @@index([status])
 }

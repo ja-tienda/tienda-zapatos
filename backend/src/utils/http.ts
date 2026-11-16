@@ -3,6 +3,9 @@ import { Prisma } from '@prisma/client';
 import { MulterError } from 'multer';
 import { ZodError } from 'zod';
 
+// En producción el cliente recibe solo el mensaje; los detalles técnicos se quedan en el servidor
+const isProduction = process.env.NODE_ENV === 'production';
+
 /** Error con código HTTP que el cliente puede mostrar tal cual. */
 export class HttpError extends Error {
   constructor(
@@ -33,7 +36,7 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     const field = first?.path.join('.');
     return res.status(400).json({
       error: first ? `${field ? field + ': ' : ''}${first.message}` : 'Datos inválidos',
-      details: err.issues,
+      ...(isProduction ? {} : { details: err.issues }),
     });
   }
   if (err instanceof MulterError) {
@@ -49,6 +52,7 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
   if (err instanceof SyntaxError && 'body' in err) {
     return res.status(400).json({ error: 'JSON inválido' });
   }
+  // Al registro va el error completo (para diagnosticar); al cliente, nunca el detalle ni la traza
   console.error(err);
-  res.status(500).json({ error: 'Error interno del servidor' });
+  res.status(500).json({ error: 'Ocurrió un error inesperado. Inténtalo de nuevo en un momento.' });
 }

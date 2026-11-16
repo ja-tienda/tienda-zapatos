@@ -1,20 +1,22 @@
 import { Check, CircleCheck, CircleX, Clock, CreditCard, LoaderCircle, MessageCircle, Smartphone } from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
+import AuthPanel from '../components/account/AuthPanel';
+import OrderProgress from '../components/account/OrderProgress';
 import CardPayment from '../components/checkout/CardPayment';
 import WalletPayment from '../components/checkout/WalletPayment';
 import { DELIVERY_LABELS, PAYMENT_LABELS, ROUTES } from '../config/constants';
+import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { useStore } from '../context/StoreContext';
-import { usePageTitle } from '../hooks/usePageTitle';
+import { usePageMeta } from '../hooks/usePageMeta';
 import { ApiError, api } from '../services/api';
 import type { Order } from '../types';
 import { buildOrderMessage, formatPrice, whatsappUrl } from '../utils/format';
-import { getOrderToken } from '../utils/orderStore';
 
 type Method = 'wallet' | 'card' | 'manual';
 
-/** Cada cuánto se consulta si la administradora ya confirmó el pago. */
+/** Cada cuánto se consulta si el estado del pedido cambió (pago confirmado, enviado…). */
 const POLL_MS = 20_000;
 
 function MethodCard({
@@ -85,14 +87,16 @@ function StatusPanel({ tone, icon, title, children }: { tone: 'ok' | 'wait' | 'o
   );
 }
 
+const hourOf = (iso: string) => new Date(iso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+
 /** Paso 2 de la compra: elegir cómo pagar, pagar y seguir el estado del pedido. */
 export default function OrderPage() {
   const { code = '' } = useParams();
   const navigate = useNavigate();
-  const { settings } = useStore();
-  const { clearCart } = useCart();
-  const orderToken = getOrderToken(code);
-  usePageTitle(`Pedido ${code.toUpperCase()}`);
+  const { settings, products, reload } = useStore();
+  const { user, loading: authLoading } = useAuth();
+  const { clearCart, replaceItems } = useCart();
+  usePageMeta(`Pedido ${code.toUpperCase()}`);
 
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -101,9 +105,9 @@ export default function OrderPage() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    if (!orderToken) return;
+    if (!user) return;
     try {
-      setOrder(await api.getOrder(code, orderToken));
+      setOrder(await api.getOrder(code));
       setError(null);
     } catch (err) {
       // Un fallo de red al refrescar no debe borrar lo que ya se ve
@@ -112,40 +116,23 @@ export default function OrderPage() {
         return current;
       });
     }
-  }, [code, orderToken]);
+  }, [code, user]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  // Mientras el pedido espera confirmación se consulta de vez en cuando
-  const waiting = order?.status === 'PENDIENTE';
+  // Mientras el pedido siga en camino se consulta de vez en cuando
+  const active = order !== null && order.status !== 'ENTREGADO' && order.status !== 'CANCELADO';
   useEffect(() => {
-    if (!waiting) return;
+    if (!active) return;
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') void load();
     }, POLL_MS);
     return () => clearInterval(timer);
-  }, [waiting, load]);
+  }, [active, load]);
 
-  if (!orderToken || error) {
-    return (
-      <section className="mx-auto max-w-xl px-4 py-24 text-center">
-        <h1 className="font-display text-4xl font-medium text-stone-900">No encontramos este pedido</h1>
-        <p className="mt-3 text-stone-600">
-          {error ?? 'Por seguridad, un pedido solo se puede ver y pagar desde el mismo dispositivo donde se creó.'}
-        </p>
-        <Link
-          to={ROUTES.home}
-          className="mt-7 inline-block rounded-full bg-stone-900 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-600"
-        >
-          Volver al inicio
-        </Link>
-      </section>
-    );
-  }
-
-  if (!order) {
+  if (authLoading || (user && !order && !error)) {
     return (
       <p className="flex items-center justify-center gap-2 py-32 text-sm text-stone-500" aria-busy="true">
         <LoaderCircle className="size-4 animate-spin" aria-hidden />
@@ -154,10 +141,33 @@ export default function OrderPage() {
     );
   }
 
-  const whatsapp = whatsappUrl(settings.contactPhone, buildOrderMessage(order, settings));
+  if (!user) {
+    return (
+      <section className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
+        <AuthPanel next={ROUTES.order(code)} intro="Inicia sesión para ver y pagar tu pedido." />
+      </section>
+    );
+  }
+
+  if (error || !order) {
+    return (
+      <section className="mx-auto max-w-xl px-4 py-24 text-center">
+        <h1 className="font-display text-4xl font-medium text-stone-900">No encontramos este pedido</h1>
+        <p className="mt-3 text-stone-600">{error ?? 'Revisa que hayas iniciado sesión con la cuenta con la que compraste.'}</p>
+        <Link
+          to={ROUTES.account}
+          className="mt-7 inline-block rounded-full bg-stone-900 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-600"
+        >
+          Ver mis pedidos
+        </Link>
+      </section>
+    );
+  }
+
+  const contact = settings.contactName;
   const whatsappButton = (label: string) => (
     <a
-      href={whatsapp}
+      href={whatsappUrl(settings.contactPhone, buildOrderMessage(order, settings))}
       target="_blank"
       rel="noopener noreferrer"
       className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 px-6 py-3.5 text-sm font-bold text-white transition-colors hover:bg-emerald-700"
@@ -176,8 +186,31 @@ export default function OrderPage() {
 
   async function editOrder() {
     setBusy(true);
-    // Se descarta este pedido (aún sin pago) y se vuelve al paso anterior con el carrito intacto
-    await api.cancelOrder(order!.code, orderToken!).catch(() => {});
+    // Se descarta este pedido (aún sin pago), se libera su stock y sus productos vuelven al carrito
+    const cancelled = await api.cancelOrder(order!.code).then(() => true).catch(() => false);
+    if (cancelled) {
+      replaceItems(
+        order!.items.flatMap((line) => {
+          const product = products.find((p) => p.id === line.productId);
+          const variant = product?.variants.find((v) => v.id === line.variantId);
+          if (!product || !variant) return [];
+          return [
+            {
+              variantId: variant.id,
+              productId: product.id,
+              name: product.name,
+              image: product.images[0] ?? null,
+              size: variant.size,
+              price: product.price,
+              quantity: line.quantity,
+              // El catálogo en pantalla aún descuenta lo que este pedido tenía apartado
+              maxStock: Math.max(variant.stock + line.quantity, line.quantity),
+            },
+          ];
+        }),
+      );
+      void reload();
+    }
     navigate(ROUTES.checkout);
   }
 
@@ -186,7 +219,7 @@ export default function OrderPage() {
     const tab = window.open('', '_blank');
     setBusy(true);
     try {
-      const updated = await api.setManualMethod(order!.code, orderToken!, paymentMethod);
+      const updated = await api.setManualMethod(order!.code, paymentMethod);
       const url = whatsappUrl(settings.contactPhone, buildOrderMessage(updated, settings));
       if (tab) tab.location.href = url;
       completed(updated);
@@ -197,8 +230,8 @@ export default function OrderPage() {
     }
   }
 
-  const choosingPayment = order.status === 'PENDIENTE' && !order.paidAt && (!order.paymentMethod || resend);
-  const contact = settings.contactName;
+  const choosingPayment = order.status === 'PENDIENTE' && (!order.paymentMethod || resend);
+  const paid = order.status === 'PAGADO' || order.status === 'ENVIADO' || order.status === 'ENTREGADO';
 
   return (
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
@@ -209,17 +242,35 @@ export default function OrderPage() {
 
       <div className="mt-8 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="space-y-4">
-          {order.status === 'CONFIRMADO' ? (
-            <StatusPanel tone="ok" icon={<CircleCheck className="size-14" strokeWidth={1.5} />} title="¡Pago confirmado!">
+          {!choosingPayment && order.status !== 'CANCELADO' && (
+            <div className="rounded-3xl border border-stone-200/80 bg-white px-3 py-5 sm:px-6">
+              <OrderProgress status={order.status} />
+            </div>
+          )}
+
+          {paid ? (
+            <StatusPanel
+              tone="ok"
+              icon={<CircleCheck className="size-14" strokeWidth={1.5} />}
+              title={order.status === 'PAGADO' ? '¡Pago confirmado!' : order.status === 'ENVIADO' ? 'Tu pedido va en camino' : 'Pedido entregado'}
+            >
               <p>
-                Tu pedido está confirmado. {contact} te escribirá por WhatsApp para coordinar la entrega
-                {order.deliveryMethod === 'ENVIO_PROVINCIA' ? ' y enviarte tu código de envío' : ''}.
+                {order.status === 'PAGADO' &&
+                  `${contact} está preparando tu pedido y te escribirá por WhatsApp para coordinar la entrega${
+                    order.deliveryMethod === 'ENVIO_PROVINCIA' ? ' y enviarte tu código de envío' : ''
+                  }.`}
+                {order.status === 'ENVIADO' && 'Ya salió hacia tu destino. Si necesitas el código de seguimiento, pídelo por WhatsApp.'}
+                {order.status === 'ENTREGADO' && '¡Gracias por tu compra! Si algo no quedó como esperabas, escríbenos.'}
               </p>
               {whatsappButton(`Escribir a ${contact}`)}
             </StatusPanel>
           ) : order.status === 'CANCELADO' ? (
             <StatusPanel tone="off" icon={<CircleX className="size-14" strokeWidth={1.5} />} title="Pedido cancelado">
-              <p>Este pedido fue cancelado. Si crees que es un error, escríbenos por WhatsApp.</p>
+              <p>
+                {order.paidAt
+                  ? `Recibimos un pago por este pedido después de que fue cancelado. ${contact} te escribirá para devolverte el dinero o reactivarlo.`
+                  : 'Este pedido se canceló (por ejemplo, porque pasó el tiempo para pagarlo) y sus productos volvieron al catálogo. Puedes armarlo otra vez.'}
+              </p>
               <Link
                 to={ROUTES.catalog}
                 className="inline-block rounded-full bg-stone-900 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-600"
@@ -227,17 +278,12 @@ export default function OrderPage() {
                 Volver al catálogo
               </Link>
             </StatusPanel>
-          ) : order.paidAt ? (
-            <StatusPanel tone="ok" icon={<CircleCheck className="size-14" strokeWidth={1.5} />} title="Recibimos tu pago">
-              <p>Tu pago con tarjeta fue aprobado. {contact} revisará tu pedido y te escribirá para coordinar la entrega.</p>
-              {whatsappButton(`Escribir a ${contact}`)}
-            </StatusPanel>
-          ) : !choosingPayment && order.receiptUrl ? (
+          ) : !choosingPayment && order.hasReceipt ? (
             <StatusPanel tone="wait" icon={<Clock className="size-14" strokeWidth={1.5} />} title="Comprobante recibido">
               <p>
-                {contact} verificará tu pago y confirmará tu pedido. Esta página se actualiza sola cuando eso ocurra.
+                {contact} verificará tu pago y confirmará tu pedido. Esta página se actualiza sola cuando eso ocurra, y también lo verás
+                en Mi cuenta.
               </p>
-              <p className="text-sm">Para que lo revise más rápido, avísale por WhatsApp: el mensaje ya incluye tu pedido y el enlace a tu comprobante.</p>
               <div className="flex flex-col items-center gap-3">
                 {whatsappButton(`Avisar a ${contact} por WhatsApp`)}
                 <button type="button" onClick={() => setResend(true)} className="text-sm font-medium text-stone-600 underline underline-offset-4 hover:text-stone-900">
@@ -261,6 +307,12 @@ export default function OrderPage() {
           ) : (
             <>
               <h2 className="font-display text-2xl font-medium text-stone-900">Elige cómo pagar</h2>
+              {order.reservedUntil && !order.paymentMethod && (
+                <p className="flex items-center gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  <Clock className="size-4 shrink-0" aria-hidden />
+                  Apartamos tus productos hasta las {hourOf(order.reservedUntil)}. Si no pagas antes, vuelven al catálogo.
+                </p>
+              )}
               <div className="space-y-3" role="radiogroup" aria-label="Forma de pago">
                 <MethodCard
                   selected={method === 'wallet'}
@@ -269,7 +321,7 @@ export default function OrderPage() {
                   title="Yape o Plin"
                   description="Pagas desde tu app y subes la captura. Lo confirmamos en minutos."
                 >
-                  <WalletPayment order={order} orderToken={orderToken} onSent={completed} />
+                  <WalletPayment order={order} onSent={completed} />
                 </MethodCard>
 
                 <MethodCard
@@ -281,7 +333,7 @@ export default function OrderPage() {
                   title="Tarjeta de crédito o débito"
                   description="Pago en línea con Izipay. Confirmación inmediata, sin enviar capturas."
                 >
-                  <CardPayment order={order} orderToken={orderToken} onPaid={completed} />
+                  <CardPayment order={order} onPaid={completed} />
                 </MethodCard>
 
                 <MethodCard
@@ -348,7 +400,7 @@ export default function OrderPage() {
           </div>
           <dl className="mt-4 space-y-1.5 border-t border-stone-200 pt-4 text-sm text-stone-600">
             <div>
-              <dt className="inline text-stone-500">Cliente: </dt>
+              <dt className="inline text-stone-500">Recibe: </dt>
               <dd className="inline">{order.customerName}</dd>
             </div>
             <div>
@@ -359,7 +411,9 @@ export default function OrderPage() {
               </dd>
             </div>
           </dl>
-          <p className="mt-4 text-xs text-stone-500">¿Dudas con tu pago? Escríbenos por WhatsApp con tu código de pedido.</p>
+          <Link to={ROUTES.account} className="mt-4 block text-sm font-medium text-accent-600 hover:underline">
+            Ver todos mis pedidos
+          </Link>
         </aside>
       </div>
     </section>
