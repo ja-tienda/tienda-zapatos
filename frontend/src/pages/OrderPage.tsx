@@ -93,9 +93,9 @@ const hourOf = (iso: string) => new Date(iso).toLocaleTimeString('es-PE', { hour
 export default function OrderPage() {
   const { code = '' } = useParams();
   const navigate = useNavigate();
-  const { settings } = useStore();
+  const { settings, products, reload } = useStore();
   const { user, loading: authLoading } = useAuth();
-  const { clearCart } = useCart();
+  const { clearCart, replaceItems } = useCart();
   usePageMeta(`Pedido ${code.toUpperCase()}`);
 
   const [order, setOrder] = useState<Order | null>(null);
@@ -186,8 +186,31 @@ export default function OrderPage() {
 
   async function editOrder() {
     setBusy(true);
-    // Se descarta este pedido (aún sin pago), se libera su stock y se vuelve al paso anterior
-    await api.cancelOrder(order!.code).catch(() => {});
+    // Se descarta este pedido (aún sin pago), se libera su stock y sus productos vuelven al carrito
+    const cancelled = await api.cancelOrder(order!.code).then(() => true).catch(() => false);
+    if (cancelled) {
+      replaceItems(
+        order!.items.flatMap((line) => {
+          const product = products.find((p) => p.id === line.productId);
+          const variant = product?.variants.find((v) => v.id === line.variantId);
+          if (!product || !variant) return [];
+          return [
+            {
+              variantId: variant.id,
+              productId: product.id,
+              name: product.name,
+              image: product.images[0] ?? null,
+              size: variant.size,
+              price: product.price,
+              quantity: line.quantity,
+              // El catálogo en pantalla aún descuenta lo que este pedido tenía apartado
+              maxStock: Math.max(variant.stock + line.quantity, line.quantity),
+            },
+          ];
+        }),
+      );
+      void reload();
+    }
     navigate(ROUTES.checkout);
   }
 

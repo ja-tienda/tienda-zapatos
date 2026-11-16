@@ -59,7 +59,7 @@ function OrderSummary({ items, subtotal }: { items: CartItem[]; subtotal: number
  * así que no se pierde al entrar (ni al volver de Google).
  */
 export default function CheckoutPage() {
-  const { items, subtotal } = useCart();
+  const { items, subtotal, clearCart } = useCart();
   const { user, loading: authLoading } = useAuth();
   const { reload } = useStore();
   const navigate = useNavigate();
@@ -120,6 +120,9 @@ export default function CheckoutPage() {
         customerPhone: form.customerPhone.replace(/\s/g, ''),
         items: items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
       });
+      // Lo pedido ya quedó apartado en el servidor: el carrito queda libre para otra compra.
+      // Si el cliente vuelve a editar el pedido, sus productos regresan al carrito.
+      clearCart();
       navigate(ROUTES.order(order.code));
     } catch (err) {
       setSubmitError(err instanceof ApiError ? err.message : 'Ocurrió un error inesperado. Inténtalo de nuevo.');
@@ -129,7 +132,7 @@ export default function CheckoutPage() {
     }
   }
 
-  if (items.length === 0) {
+  if (items.length === 0 && !submitting) {
     return (
       <section className="mx-auto max-w-xl px-4 py-24 text-center">
         <h1 className="font-display text-4xl font-medium text-stone-900">Tu carrito está vacío</h1>

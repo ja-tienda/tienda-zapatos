@@ -18,6 +18,8 @@ interface CartContextValue {
   setQuantity: (variantId: number, quantity: number) => void;
   removeItem: (variantId: number) => void;
   clearCart: () => void;
+  /** Reemplaza todo el carrito (se usa al volver a editar un pedido que aún no se pagó). */
+  replaceItems: (items: CartItem[]) => void;
   /** Cruza el carrito con el catálogo recién traído de la BD y devuelve avisos para el cliente. */
   syncWithCatalog: (products: Product[]) => string[];
   quantityOf: (variantId: number) => number;
@@ -98,6 +100,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearCart = useCallback(() => setItems([]), []);
+  const replaceItems = useCallback((next: CartItem[]) => setItems(next), []);
 
   const syncWithCatalog = useCallback(
     (products: Product[]): string[] => {
@@ -163,10 +166,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
       setQuantity,
       removeItem,
       clearCart,
+      replaceItems,
       syncWithCatalog,
       quantityOf: (variantId) => items.find((i) => i.variantId === variantId)?.quantity ?? 0,
     }),
-    [items, isOpen, addItem, setQuantity, removeItem, clearCart, syncWithCatalog],
+    [items, isOpen, addItem, setQuantity, removeItem, clearCart, replaceItems, syncWithCatalog],
   );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

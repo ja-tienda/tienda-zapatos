@@ -1,16 +1,16 @@
 # J & A — Calzados, ropa y accesorios
 
-Tienda virtual full-stack: catálogo con stock real por talla, páginas por categoría y temporada, carrito, checkout con Yape/Plin (QR + captura del pago), pago con tarjeta por Izipay y panel de administración.
+Tienda virtual full-stack: catálogo con stock real por talla, páginas por categoría y temporada, cuentas de clientes, favoritos, checkout con Yape/Plin (QR + captura), pago con tarjeta por Izipay, Libro de Reclamaciones y panel de administración.
 
-| Parte | Tecnología | Puerto |
+| Parte | Tecnología | Puerto local |
 | --- | --- | --- |
 | Base de datos | PostgreSQL 17 en Docker (`ja-tienda-db`) | 5433 |
-| Backend | Node + Express 5 + TypeScript + Prisma 6 | 4000 |
-| Frontend (tienda + panel) | React 19 + Vite + TypeScript + Tailwind 4 | 5173 |
+| Backend (`/backend`) | Node + Express 5 + TypeScript + Prisma 6 | 4000 |
+| Frontend (`/frontend`): tienda en `/` y panel en `/admin/` | React 19 + Vite + TypeScript + Tailwind 4 | 5173 |
 
-> La base usa el puerto **5433** porque el 5432 ya lo ocupa el contenedor `inventario-db` de otro proyecto.
+**Para publicar o configurar Railway, Google, Resend, Izipay y el dominio: [docs/LANZAMIENTO.md](docs/LANZAMIENTO.md).**
 
-## Primera vez
+## Primera vez en tu PC
 
 ```bash
 docker compose up -d
@@ -28,11 +28,11 @@ cd frontend
 npm install
 ```
 
-`backend/.env` ya existe para desarrollo local. En otra PC, créalo a partir de `.env.example`.
+Crea `backend/.env` a partir de `.env.example`. Para desarrollo basta con `DATABASE_URL`, `ADMIN_USERNAME`, `ADMIN_EMAIL` y `ADMIN_INITIAL_PASSWORD` (mínimo 10 caracteres): al arrancar por primera vez se crea la cuenta de administración con esos datos.
 
 ## Día a día
 
-Con Docker Desktop abierto, en tres terminales de VS Code:
+Con Docker Desktop abierto, en tres terminales:
 
 ```bash
 docker compose up -d
@@ -48,81 +48,84 @@ cd frontend
 npm run dev
 ```
 
+Tienda: http://localhost:5173 · Panel: http://localhost:5173/admin/
+
+En desarrollo los correos (recuperar contraseña, constancia de reclamos) no se envían: se imprimen en la terminal del backend.
+
 ## Páginas
 
 | Página | URL |
 | --- | --- |
-| Inicio: portada, categorías, carrusel de temporadas y catálogo | http://localhost:5173/ |
-| Una categoría o temporada (portada propia + sus productos) | `/seccion/calzados`, `/seccion/temporada-verano`… |
-| Ofertas (se arma sola con lo que tiene precio rebajado) | `/ofertas` |
-| Checkout: datos del cliente y entrega | `/checkout` |
+| Inicio, catálogo y carrusel | `/` |
+| Categoría o temporada | `/seccion/calzados`, `/seccion/temporada-verano`… |
+| Ofertas | `/ofertas` |
+| Producto (el enlace que se comparte) | `/producto/urban-flow-coral-edition` |
+| Checkout: inicio de sesión + datos de entrega | `/checkout` |
 | Pago y seguimiento del pedido | `/pedido/JA-XXXXX` |
-| Términos y privacidad | `/terminos`, `/privacidad` |
-| **Panel de administración** (PIN `1234`, se cambia en `backend/.env`) | http://localhost:5173/admin/ |
+| Mi cuenta: pedidos, favoritos y datos | `/cuenta` |
+| Recuperar contraseña | `/recuperar`, `/restablecer?token=…` |
+| Legales | `/terminos`, `/privacidad`, `/cambios-y-devoluciones`, `/libro-de-reclamaciones` |
+| Panel de administración | `/admin/` |
 
-Los filtros viajan en la dirección (`?genero=DAMA&talla=38`), así un enlace compartido abre la misma vista.
+## Cómo funciona
 
-## Qué se edita desde el panel
+**Cuentas.** Se puede navegar, llenar el carrito y marcar favoritos sin cuenta. El inicio de sesión o registro (correo y contraseña, o Google) aparece al pulsar "Continuar con la compra". El carrito vive en el navegador, así que no se pierde al entrar; los favoritos marcados sin cuenta pasan a la cuenta.
+
+**Sesiones.** Una cookie `httpOnly`, `secure` y `SameSite` guarda un valor aleatorio; en la base solo está su huella. Las contraseñas se guardan con bcrypt. Tras 5 intentos fallidos la cuenta se bloquea 15 minutos.
+
+**Pedidos y stock.** Al crear el pedido, el servidor recalcula precios y total con los datos de la base y **reserva el stock** en una transacción con descuento condicional: dos personas no pueden llevarse la última unidad. Si el pedido no se paga en 30 minutos, se cancela solo y el stock vuelve.
+
+| Estado | Cuándo |
+| --- | --- |
+| `PENDIENTE` | Pedido creado, stock reservado |
+| `PAGADO` | La administradora confirma el Yape/Plin, o llega la notificación firmada de Izipay |
+| `ENVIADO` / `ENTREGADO` | Los marca la administradora |
+| `CANCELADO` | Venció la reserva o se canceló; el stock vuelve al inventario |
+
+**Pagos.** Yape/Plin: el cliente sube la captura, que se guarda en una carpeta privada (solo la ve la administradora). Tarjeta: el pedido pasa a `PAGADO` únicamente cuando el backend recibe la notificación de Izipay (IPN) y verifica su firma; lo que diga el navegador no cuenta.
+
+## Panel
 
 | Pestaña | Qué controla |
 | --- | --- |
-| Productos y stock | Productos, fotos (subidas desde el dispositivo o por URL), categoría, género (Dama, Caballero, Niña, Niño, Unisex), temporadas, precios y stock por talla |
-| Pedidos | Ver la captura del pago, confirmar (descuenta stock) o cancelar |
-| Secciones | Categorías y temporadas/colecciones: nombre, portada, título, texto, botón, si sale en el carrusel |
-| Apariencia | Logo, franja superior y portada de inicio (textos e imagen) |
-| Contacto y pagos | WhatsApp, correo, horario, número/titular/QR de Yape-Plin, términos y privacidad |
+| Productos y stock | Productos, fotos, categoría, público, temporadas, precios y stock por talla |
+| Pedidos | Captura del pago, confirmar, marcar enviado/entregado, cancelar |
+| Clientes | Cuentas registradas, sus pedidos y desactivar/reactivar |
+| Reclamos | Hojas del Libro de Reclamaciones y su respuesta (se envía por correo) |
+| Secciones | Categorías y temporadas: portada, textos, carrusel y qué productos incluye cada temporada |
+| Apariencia | Logo, franja superior y portada de inicio |
+| Contacto y pagos | WhatsApp, correo, horario, datos del negocio, Yape/Plin (QR) y textos legales |
+| Mi acceso | Cambiar la contraseña y ver el estado del servidor (https, IP, integraciones) |
 | Vista previa | La tienda real en tamaño celular, tablet o computadora |
-
-En los títulos, lo escrito entre `*asteriscos*` sale resaltado en cursiva.
-
-## Cómo funciona un pedido
-
-1. El cliente llena sus datos en `/checkout`. El servidor valida el stock, calcula precios y total, y crea el pedido `PENDIENTE` con un código (`JA-XXXXX`). El navegador recibe una clave secreta: solo ese dispositivo puede ver y pagar ese pedido.
-2. En `/pedido/…` elige cómo pagar:
-   - **Yape o Plin**: ve el QR, el número y el monto, paga en su app y sube la captura con “Ya pagué · Enviar comprobante”. La captura queda en el pedido y se le ofrece avisar por WhatsApp (el mensaje incluye el enlace a la captura).
-   - **Tarjeta (Izipay)**: paga en el formulario incrustado; el pedido se confirma solo.
-   - **Coordinar por WhatsApp**: transferencia o contra entrega.
-3. En el panel, **Confirmar pago** descuenta el stock. Cancelar un pedido ya confirmado lo devuelve.
-
-## Activar el pago con tarjeta (Izipay)
-
-Mientras falten las claves, la opción aparece como “Próximamente”.
-
-1. Afíliate a Izipay y entra al **Back Office Vendedor** → Configuración → Tienda → *Claves de API REST*.
-2. Copia las cuatro claves **de prueba** a `backend/.env` y reinicia el backend:
-
-   ```
-   IZIPAY_USERNAME=      # identificador de la tienda
-   IZIPAY_PASSWORD=      # contraseña de test (testpassword_…)
-   IZIPAY_PUBLIC_KEY=    # clave pública de test
-   IZIPAY_HMAC_KEY=      # clave HMAC-SHA-256 de test
-   ```
-3. Prueba un pago con las [tarjetas de prueba de Izipay](https://secure.micuentaweb.pe/doc/es-PE/rest/V4.0/api/kb/test_cards.html).
-4. Para producción: cambia las cuatro claves por las de producción y registra la URL de notificación en el Back Office (Configuración → Reglas de notificación → *URL de notificación al final del pago*): `https://TU-DOMINIO/api/payments/izipay/ipn`.
-
-El código está en `backend/src/controllers/payment.controller.ts` y `frontend/src/components/checkout/CardPayment.tsx`.
 
 ## Comandos útiles (dentro de `backend/`)
 
 | Comando | Para qué |
 | --- | --- |
-| `npm run db:seed` | Recarga los 12 productos de prueba (borra los productos actuales; conserva pedidos, secciones y ajustes) |
+| `npm run db:seed` | Recarga los productos de prueba. **Borra los productos actuales**; no lo ejecutes en producción |
+| `npm run db:deploy` | Aplica las migraciones pendientes |
 | `npm run db:studio` | Abre Prisma Studio para ver las tablas |
-| `npx prisma migrate deploy` | Aplica las migraciones pendientes |
-| `npm run db:reset` | Borra **toda** la base y la recrea con el seed |
 | `npm run typecheck` | Revisa errores de TypeScript (también existe en `frontend/`) |
+| `npm run build` y `npm start` | Compila y arranca como en producción (aplica migraciones al arrancar) |
 
-Para cambiar el modelo de datos: edita `prisma/schema.prisma` y ejecuta `npm run db:migrate` en una terminal normal (pide confirmación).
+Para cambiar el modelo de datos: edita `prisma/schema.prisma` y ejecuta `npm run db:migrate` en una terminal normal.
+
+## Estructura
+
+```
+backend/
+  prisma/            esquema, migraciones y datos de prueba
+  src/config/        variables de entorno (validadas), ajustes editables, tallas
+  src/middleware/    sesiones (auth.ts) y seguridad (security.ts: CSRF, https, límites)
+  src/controllers/   auth, account, order, payment (Izipay), complaint, seo, product…
+  src/services/      mailer.ts (Resend)
+frontend/
+  src/               tienda (pages/, components/, context/)
+  src/admin/         panel de administración
+  server/            servidor de producción: cabeceras, SEO y sitemap
+docs/LANZAMIENTO.md  guía de despliegue y configuración
+```
 
 ## Imágenes subidas
 
-Las fotos subidas desde el panel y las capturas de pago se guardan optimizadas (WebP) en `backend/uploads/`. Esa carpeta **no** está en git: hay que respaldarla junto con la base de datos, y el hosting debe tener disco persistente. Cuando se quita una foto, se borra un producto o se reemplaza una portada, el archivo que ya nadie usa se elimina solo.
-
-## Antes de publicar
-
-- Cambiar `ADMIN_PIN`, `ADMIN_TOKEN_SECRET` y la contraseña de PostgreSQL.
-- Poner `TRUST_PROXY=1` en `backend/.env` si el backend queda detrás de un proxy (Nginx, Render, Railway…), para que el límite de intentos distinga a cada visitante.
-- Servir tienda y API bajo el mismo dominio (lo más simple: un proxy que envíe `/api` y `/uploads` al backend). Si van en dominios distintos, definir `VITE_API_URL`, `CORS_ORIGIN` y `PUBLIC_URL`.
-- Configurar el servidor web para que cualquier ruta de la tienda (`/seccion/...`, `/checkout`…) entregue `index.html`, y `/admin/` entregue `admin/index.html`.
-- Subir el QR de Yape, el logo y las fotos reales; revisar los textos de términos y privacidad (son una plantilla base).
-- Reemplazar las fotos de Unsplash del seed por fotos propias.
+Se guardan optimizadas (WebP) en `backend/uploads/` (o en `UPLOADS_DIR`). `productos/` y `sitio/` son públicas; `comprobantes/` es privada. La carpeta no está en git: en Railway debe ser un Volume y hay que respaldarla junto con la base.
