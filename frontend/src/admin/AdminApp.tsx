@@ -84,10 +84,9 @@ export default function AdminApp() {
       .catch(() => setAdmin(null));
   }, []);
 
-  const closeForms = () => {
-    setEditingProduct(undefined);
-    setEditingSection(undefined);
-  };
+  // Al cambiar de pestaña el producto que se estaba creando o editando queda abierto
+  // (y su borrador guardado): al volver a "Productos y stock" sigue ahí, tal cual.
+  const closeForms = () => setEditingSection(undefined);
 
   // La pestaña activa vive en la URL (#pedidos) para poder recargar o guardar el enlace.
   useEffect(() => {
@@ -191,7 +190,9 @@ export default function AdminApp() {
     setStock: async (id, stock) => applyProduct(await call(() => api.patchVariant(id, { stock }))),
     toggleVariant: async (id, isActive) => applyProduct(await call(() => api.patchVariant(id, { isActive }))),
     deleteVariant: async (id) => applyProduct(await call(() => api.deleteVariant(id))),
-    addVariant: async (productId, size) => applyProduct(await call(() => api.addVariant(productId, { size, stock: 0 }))),
+    addVariant: async (productId, size, usSize) =>
+      applyProduct(await call(() => api.addVariant(productId, { size, usSize, stock: 0 }))),
+    renameVariant: async (id, size, usSize) => applyProduct(await call(() => api.patchVariant(id, { size, usSize }))),
   };
 
   async function refreshProducts() {
@@ -204,14 +205,15 @@ export default function AdminApp() {
     if (fresh) setSections(fresh);
   }
 
-  async function saveProduct(data: ProductInput) {
+  async function saveProduct(data: ProductInput): Promise<boolean> {
     const target = editingProduct;
     const saved = await call(() => (target ? api.updateProduct(target.id, data) : api.createProduct(data)), { rethrow: true });
-    if (!saved) return;
+    if (!saved) return false; // sesión vencida: el borrador se conserva para después de entrar
     applyProduct(saved);
     setLastSavedId(saved.id);
     setEditingProduct(undefined);
     void refreshSections();
+    return true;
   }
 
   async function removeProduct(product: Product) {
@@ -466,7 +468,7 @@ export default function AdminApp() {
               categories={categories}
               collections={collections}
               onSave={saveProduct}
-              onCancel={() => setEditingProduct(undefined)}
+              onClose={() => setEditingProduct(undefined)}
             />
           ) : (
             <ProductsPanel

@@ -214,7 +214,7 @@ export function ProductDetailContent({ product, initialVariantId, onClose, onOpe
 
             {variant && (variant.usSize || variant.cmSize) && (
               <p className="mt-2 text-xs text-stone-500">
-                Talla {variant.size}
+                Talla Perú {variant.size}
                 {variant.usSize && ` · US ${variant.usSize}`}
                 {variant.cmSize && ` · plantilla de ${variant.cmSize} cm`}
               </p>

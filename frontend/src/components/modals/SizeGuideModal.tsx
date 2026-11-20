@@ -1,4 +1,5 @@
-import { CLOTHING_SIZE_TABLE, KIDS_SHOE_SIZE_TABLE, SHOE_SIZE_TABLE } from '../../config/constants';
+import { CLOTHING_SIZE_TABLE } from '../../config/constants';
+import { ADULT_SHOE_GUIDE, KIDS_SHOE_GUIDE } from '../../config/sizes';
 import { useStore } from '../../context/StoreContext';
 import { whatsappUrl } from '../../utils/format';
 import Modal from './Modal';
@@ -18,19 +19,49 @@ export default function SizeGuideModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-7 p-5 sm:p-6">
         <section>
           <h3 className="font-display text-xl font-medium text-stone-900">Calzado</h3>
-          <div className="mt-3 overflow-hidden rounded-xl border border-stone-200">
+          <div className="mt-3 max-h-80 overflow-auto rounded-xl border border-stone-200">
             <table className="w-full text-center text-sm">
-              <thead className="bg-stone-900 text-white">
+              <thead className="sticky top-0 bg-stone-900 text-white">
                 <tr>
-                  <th className="px-3 py-2.5 font-semibold">Talla Perú / EUR</th>
-                  <th className="px-3 py-2.5 font-semibold">US</th>
+                  <th className="px-3 py-2.5 font-semibold">Talla Perú</th>
+                  <th className="px-3 py-2.5 font-semibold">US Hombre</th>
+                  <th className="px-3 py-2.5 font-semibold">US Mujer</th>
                   <th className="px-3 py-2.5 font-semibold">Plantilla (CM)</th>
                 </tr>
               </thead>
               <tbody>
-                {SHOE_SIZE_TABLE.map((row, i) => (
-                  <tr key={row.eur} className={i % 2 ? 'bg-stone-50' : 'bg-white'}>
-                    <td className="px-3 py-2 font-bold text-stone-900">{row.eur}</td>
+                {ADULT_SHOE_GUIDE.map((row, i) => (
+                  <tr key={row.pe} className={i % 2 ? 'bg-stone-50' : 'bg-white'}>
+                    <td className="px-3 py-2 font-bold text-stone-900">{row.pe}</td>
+                    <td className="px-3 py-2 text-stone-600">{row.usMen}</td>
+                    <td className="px-3 py-2 text-stone-600">{row.usWomen}</td>
+                    <td className="px-3 py-2 text-stone-600">{row.cm} cm</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-xs text-stone-500">
+            Medidas referenciales: la horma puede variar un poco según el modelo. En cada producto verás la talla Perú y su
+            equivalente USA.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-display text-xl font-medium text-stone-900">Calzado de niñas y niños</h3>
+          <div className="mt-3 max-h-80 overflow-auto rounded-xl border border-stone-200">
+            <table className="w-full text-center text-sm">
+              <thead className="sticky top-0 bg-stone-100 text-stone-700">
+                <tr>
+                  <th className="px-3 py-2.5 font-semibold">Talla Perú</th>
+                  <th className="px-3 py-2.5 font-semibold">US</th>
+                  <th className="px-3 py-2.5 font-semibold">Largo del pie (CM)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {KIDS_SHOE_GUIDE.map((row) => (
+                  <tr key={row.pe} className="border-t border-stone-100">
+                    <td className="px-3 py-2 font-bold text-stone-900">{row.pe}</td>
                     <td className="px-3 py-2 text-stone-600">{row.us}</td>
                     <td className="px-3 py-2 text-stone-600">{row.cm} cm</td>
                   </tr>
@@ -39,32 +70,8 @@ export default function SizeGuideModal({ onClose }: { onClose: () => void }) {
             </table>
           </div>
           <p className="mt-2 text-xs text-stone-500">
-            Medidas referenciales: la horma puede variar un poco según el modelo.
-          </p>
-        </section>
-
-        <section>
-          <h3 className="font-display text-xl font-medium text-stone-900">Calzado de niñas y niños</h3>
-          <div className="mt-3 overflow-hidden rounded-xl border border-stone-200">
-            <table className="w-full text-center text-sm">
-              <thead className="bg-stone-100 text-stone-700">
-                <tr>
-                  <th className="px-3 py-2.5 font-semibold">Talla Perú / EUR</th>
-                  <th className="px-3 py-2.5 font-semibold">Largo del pie (CM)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {KIDS_SHOE_SIZE_TABLE.map((row) => (
-                  <tr key={row.eur} className="border-t border-stone-100">
-                    <td className="px-3 py-2 font-bold text-stone-900">{row.eur}</td>
-                    <td className="px-3 py-2 text-stone-600">{row.cm} cm</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-2 text-xs text-stone-500">
-            Mide el pie de pie y con media. Si está entre dos tallas, elige la más grande: los pies crecen rápido.
+            Mide el pie de pie y con media. Si está entre dos tallas, elige la más grande: los pies crecen rápido. En la
+            numeración USA de niños, después de la 13.5 se vuelve a empezar en 1.
           </p>
         </section>
 

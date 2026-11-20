@@ -79,7 +79,7 @@ export interface ProductInput {
   images: string[];
   featured: boolean;
   isActive: boolean;
-  variants?: { size: string; stock: number }[];
+  variants?: { size: string; stock: number; usSize?: string | null }[];
 }
 
 /** Ajustes editables desde el panel (mismas claves que backend/src/config/settings.ts). */
