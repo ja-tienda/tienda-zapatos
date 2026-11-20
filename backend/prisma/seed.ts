@@ -1,5 +1,5 @@
 import { PrismaClient, type Badge, type Gender } from '@prisma/client';
-import { SHOE_SIZE_MAP, sizeSortOrder } from '../src/config/sizes';
+import { cmSizeFor, sizeSortOrder, usSizeFor } from '../src/config/sizes';
 import { slugify } from '../src/utils/serialize';
 
 const prisma = new PrismaClient();
@@ -340,8 +340,8 @@ async function main() {
           create: Object.entries(stock).map(([size, qty]) => ({
             size,
             stock: qty,
-            usSize: SHOE_SIZE_MAP[size]?.us ?? null,
-            cmSize: SHOE_SIZE_MAP[size]?.cm ?? null,
+            usSize: usSizeFor(size, p.gender),
+            cmSize: cmSizeFor(size),
             sortOrder: sizeSortOrder(size),
           })),
         },

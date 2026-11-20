@@ -143,8 +143,11 @@ export const api = {
   updateProduct: (id: number, data: Partial<ProductInput>) => request<Product>(`/products/${id}`, { method: 'PUT', body: data }),
   patchProduct: (id: number, data: Partial<ProductInput>) => request<Product>(`/products/${id}`, { method: 'PATCH', body: data }),
   deleteProduct: (id: number) => request<void>(`/products/${id}`, { method: 'DELETE' }),
-  addVariant: (productId: number, data: { size: string; stock: number }) => post<Product>(`/products/${productId}/variants`, data),
-  patchVariant: (variantId: number, data: { delta?: number; stock?: number; isActive?: boolean }) =>
+  addVariant: (productId: number, data: { size: string; stock: number; usSize?: string | null }) => post<Product>(`/products/${productId}/variants`, data),
+  patchVariant: (
+    variantId: number,
+    data: { delta?: number; stock?: number; isActive?: boolean; size?: string; usSize?: string | null },
+  ) =>
     request<Product>(`/variants/${variantId}`, { method: 'PATCH', body: data }),
   deleteVariant: (variantId: number) => request<Product>(`/variants/${variantId}`, { method: 'DELETE' }),
 

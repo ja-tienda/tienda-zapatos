@@ -114,7 +114,7 @@ export default function ProductCard({ product, onOpen, favorite }: Props) {
                 key={v.id}
                 type="button"
                 onClick={() => onOpen(product, v.id)}
-                title={`Elegir talla ${v.size}`}
+                title={`Elegir talla ${v.size}${v.usSize ? ` (US ${v.usSize})` : ''}`}
                 className="min-w-8 rounded-full border border-stone-200 px-2 py-1 text-xs font-medium text-stone-700 transition-colors hover:border-stone-900 hover:bg-stone-900 hover:text-white"
               >
                 {v.size}
@@ -122,7 +122,7 @@ export default function ProductCard({ product, onOpen, favorite }: Props) {
             ) : (
               <span
                 key={v.id}
-                title={`Talla ${v.size} agotada`}
+                title={`Talla ${v.size}${v.usSize ? ` (US ${v.usSize})` : ''} agotada`}
                 className="min-w-8 rounded-full border border-stone-100 px-2 py-1 text-center text-xs text-stone-300 line-through"
               >
                 {v.size}

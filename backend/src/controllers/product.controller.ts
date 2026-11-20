@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../config/prisma';
 import { imageRef } from '../config/settings';
-import { SHOE_SIZE_MAP, sizeSortOrder } from '../config/sizes';
+import { cmSizeFor, normalizeSize, sizeSortOrder, usSizeFor } from '../config/sizes';
 import { isAdminRequest } from '../middleware/auth';
 import { HttpError, parseId } from '../utils/http';
 import { productInclude, serializeProduct, slugify } from '../utils/serialize';
@@ -13,8 +13,10 @@ const gender = z.enum(['NINO', 'NINA', 'DAMA', 'CABALLERO', 'UNISEX']);
 const images = z.array(imageRef).max(8);
 const ids = z.array(z.coerce.number().int().positive()).max(30);
 
+const sizeLabel = z.string().trim().min(1).max(12).transform(normalizeSize);
+
 const variantInput = z.object({
-  size: z.string().trim().min(1).max(12),
+  size: sizeLabel,
   usSize: z.string().trim().max(8).nullish(),
   cmSize: z.string().trim().max(8).nullish(),
   stock: z.coerce.number().int().min(0).max(9999).default(0),
@@ -57,6 +59,7 @@ const updateSchema = z
 
 const variantPatchSchema = z
   .object({
+    size: sizeLabel,
     stock: z.coerce.number().int().min(0).max(9999),
     delta: z.coerce.number().int().min(-9999).max(9999),
     isActive: z.boolean(),
@@ -85,15 +88,28 @@ async function assertSections(categoryId: number | undefined, collectionIds: num
   }
 }
 
-/** Completa US/CM con la tabla oficial cuando la talla es de calzado y no se indicó. */
-function withEquivalences<T extends { size: string; usSize?: string | null; cmSize?: string | null }>(v: T) {
-  const eq = SHOE_SIZE_MAP[v.size];
+type GenderValue = z.infer<typeof gender>;
+
+/**
+ * Completa US/CM con la tabla de equivalencias cuando la talla es de calzado y no se indicó.
+ * Si llega usSize: null (la administradora lo dejó vacío a propósito) se respeta.
+ */
+function withEquivalences<T extends { size: string; usSize?: string | null; cmSize?: string | null }>(
+  v: T,
+  isShoe: boolean,
+  forGender: GenderValue,
+) {
   return {
     ...v,
-    usSize: v.usSize || eq?.us || null,
-    cmSize: v.cmSize || eq?.cm || null,
+    usSize: v.usSize !== undefined ? v.usSize || null : isShoe ? usSizeFor(v.size, forGender) : null,
+    cmSize: v.cmSize !== undefined ? v.cmSize || null : isShoe ? cmSizeFor(v.size) : null,
     sortOrder: sizeSortOrder(v.size),
   };
+}
+
+async function isShoeCategory(categoryId: number) {
+  const category = await prisma.section.findUnique({ where: { id: categoryId }, select: { sizeType: true } });
+  return category?.sizeType === 'CALZADO';
 }
 
 async function uniqueSlug(name: string, ignoreId?: number): Promise<string> {
@@ -144,6 +160,7 @@ export async function createProduct(req: Request, res: Response) {
 
   const sizes = data.variants.map((v) => v.size.toLowerCase());
   if (new Set(sizes).size !== sizes.length) throw new HttpError(400, 'Hay tallas repetidas');
+  const isShoe = await isShoeCategory(data.categoryId);
 
   const { variants, categoryId, collectionIds, ...fields } = data;
   const product = await prisma.product.create({
@@ -155,7 +172,7 @@ export async function createProduct(req: Request, res: Response) {
       slug: await uniqueSlug(fields.name),
       category: { connect: { id: categoryId } },
       collections: { connect: collectionIds.map((id) => ({ id })) },
-      variants: { create: variants.map(withEquivalences) },
+      variants: { create: variants.map((v) => withEquivalences(v, isShoe, fields.gender)) },
     },
     include: adminInclude,
   });
@@ -216,7 +233,8 @@ export async function addVariant(req: Request, res: Response) {
     throw new HttpError(409, `La talla ${data.size} ya existe en este producto`);
   }
 
-  await prisma.productVariant.create({ data: { ...withEquivalences(data), productId } });
+  const isShoe = await isShoeCategory(product.categoryId);
+  await prisma.productVariant.create({ data: { ...withEquivalences(data, isShoe, product.gender), productId } });
   const updated = await prisma.product.findUniqueOrThrow({ where: { id: productId }, include: adminInclude });
   res.status(201).json(serializeProduct(updated));
 }
@@ -224,7 +242,8 @@ export async function addVariant(req: Request, res: Response) {
 /**
  * PATCH /api/variants/:id
  * { delta: +1 | -1 } suma/resta stock de forma atómica (seguro con varios clics seguidos),
- * { stock: n } fija un valor exacto, { isActive } enciende/apaga la talla.
+ * { stock: n } fija un valor exacto, { isActive } enciende/apaga la talla,
+ * { size, usSize } corrige cómo se llama la talla (Perú / USA).
  */
 export async function updateVariant(req: Request, res: Response) {
   const id = parseId(req.params.id);
@@ -232,6 +251,14 @@ export async function updateVariant(req: Request, res: Response) {
 
   if (delta !== undefined && rest.stock !== undefined) {
     throw new HttpError(400, 'Envía "delta" o "stock", no ambos');
+  }
+  if (rest.size !== undefined) {
+    const current = await prisma.productVariant.findUnique({ where: { id }, select: { productId: true } });
+    if (!current) throw new HttpError(404, 'Talla no encontrada');
+    const clash = await prisma.productVariant.findFirst({
+      where: { productId: current.productId, size: { equals: rest.size, mode: 'insensitive' }, NOT: { id } },
+    });
+    if (clash) throw new HttpError(409, `La talla ${rest.size} ya existe en este producto`);
   }
 
   const variant = await prisma.$transaction(async (tx) => {
@@ -251,6 +278,7 @@ export async function updateVariant(req: Request, res: Response) {
       where: { id },
       data: {
         ...rest,
+        ...(rest.size !== undefined ? { sortOrder: sizeSortOrder(rest.size) } : {}),
         ...(delta !== undefined && delta > 0 ? { stock: { increment: delta } } : {}),
       },
     });

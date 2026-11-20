@@ -69,7 +69,7 @@ export const SECTION_KIND_LABELS: Record<SectionKind, string> = {
 };
 
 export const SIZE_TYPE_LABELS: Record<SizeType, string> = {
-  CALZADO: 'Calzado (tallas 35–43)',
+  CALZADO: 'Calzado (Perú 35–46 y niños 22–34.5, con medias tallas)',
   ROPA: 'Ropa (S, M, L, XL)',
   UNICA: 'Talla única',
 };
@@ -132,42 +132,7 @@ export const ORDER_STATUS_STYLES: Record<OrderStatus, string> = {
 };
 
 // ---- Tallas ----
-export const SHOE_SIZES = ['35', '36', '37', '38', '39', '40', '41', '42', '43'];
-export const CLOTHING_SIZES = ['S', 'M', 'L', 'XL'];
-export const ONE_SIZE = 'Única';
-
-/** Tallas que se proponen al crear un producto según el tipo de su categoría. */
-export const SIZE_PRESETS: Record<SizeType, string[]> = {
-  CALZADO: SHOE_SIZES,
-  ROPA: CLOTHING_SIZES,
-  UNICA: [ONE_SIZE],
-};
-
-/** Talla nacional (EUR/PE) -> US y largo de plantilla en CM. Misma tabla que usa el backend. */
-export const SHOE_SIZE_TABLE: { eur: string; us: string; cm: string }[] = [
-  { eur: '35', us: '5', cm: '22.5' },
-  { eur: '36', us: '5.5', cm: '23' },
-  { eur: '37', us: '6.5', cm: '23.5' },
-  { eur: '38', us: '7', cm: '24' },
-  { eur: '39', us: '7.5', cm: '25' },
-  { eur: '40', us: '8', cm: '25.5' },
-  { eur: '41', us: '9', cm: '26.5' },
-  { eur: '42', us: '9.5', cm: '27' },
-  { eur: '43', us: '10', cm: '27.5' },
-];
-
-/** Calzado infantil: talla -> largo aproximado del pie. Referencial; ajústalo a tus marcas. */
-export const KIDS_SHOE_SIZE_TABLE: { eur: string; cm: string }[] = [
-  { eur: '26', cm: '16' },
-  { eur: '27', cm: '16.5' },
-  { eur: '28', cm: '17.5' },
-  { eur: '29', cm: '18' },
-  { eur: '30', cm: '18.5' },
-  { eur: '31', cm: '19.5' },
-  { eur: '32', cm: '20' },
-  { eur: '33', cm: '20.5' },
-  { eur: '34', cm: '21.5' },
-];
+// Las tallas de calzado (Perú / USA, medias tallas, niños) viven en ./sizes.ts
 
 export const CLOTHING_SIZE_TABLE: { size: string; chest: string; waist: string }[] = [
   { size: 'S', chest: '88 – 94', waist: '72 – 78' },

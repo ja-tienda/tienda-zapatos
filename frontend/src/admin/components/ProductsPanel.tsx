@@ -1,8 +1,9 @@
-import { ChevronDown, Eye, EyeOff, ImageOff, Pencil, Plus, Star, Trash2 } from 'lucide-react';
+import { ChevronDown, Eye, EyeOff, History, ImageOff, Pencil, Plus, Star, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { GENDER_LABELS } from '../../config/constants';
 import type { AdminSummary, Product } from '../../types';
 import { formatPrice, isOnSale, normalizeText, totalStock } from '../../utils/format';
+import { clearProductDraft, readProductDraft } from '../productDraft';
 import StockEditor, { type StockActions } from './StockEditor';
 
 interface Props {
@@ -29,6 +30,8 @@ export default function ProductsPanel({
 }: Props) {
   const [expandedId, setExpandedId] = useState<number | null>(initialExpandedId);
   const [query, setQuery] = useState('');
+  // Producto nuevo que se empezó a crear y no se guardó
+  const [pendingDraft, setPendingDraft] = useState(() => readProductDraft(null));
 
   const filtered = query.trim()
     ? products.filter((p) => normalizeText(`${p.name} ${p.brand ?? ''}`).includes(normalizeText(query.trim())))
@@ -52,6 +55,40 @@ export default function ProductsPanel({
         </dl>
       )}
 
+      {pendingDraft && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <History className="size-4 shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1">
+            Tienes un producto sin terminar
+            {pendingDraft.name.trim() ? (
+              <>
+                : <strong>{pendingDraft.name.trim()}</strong>
+              </>
+            ) : (
+              '.'
+            )}
+          </span>
+          <button
+            type="button"
+            onClick={onNew}
+            className="rounded-full bg-amber-900 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-amber-800"
+          >
+            Continuar
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (!confirm('¿Descartar el producto sin terminar? Se borrará lo que escribiste.')) return;
+              clearProductDraft(null);
+              setPendingDraft(null);
+            }}
+            className="text-xs font-semibold underline underline-offset-2 hover:text-amber-700"
+          >
+            Descartar
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2">
         <input
           type="search"
@@ -67,7 +104,7 @@ export default function ProductsPanel({
           className="flex items-center gap-1.5 rounded-full bg-accent-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-accent-700"
         >
           <Plus className="size-4" aria-hidden />
-          Nuevo producto
+          {pendingDraft ? 'Continuar producto' : 'Nuevo producto'}
         </button>
       </div>
 
